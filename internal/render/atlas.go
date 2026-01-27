@@ -203,5 +203,27 @@ func drawBlockGlyph(img *image.NRGBA, cellX, cellY int, code byte) {
 				img.SetNRGBA(cellX+x, cellY+y, w)
 			}
 		}
+	case 127: // ⌂ Open box / house (bed glyph)
+		// Draw a simple open-top box: U-shape with a hat
+		// Top line (roof)
+		for x := 3; x < 13; x++ {
+			img.SetNRGBA(cellX+x, cellY+3, w)
+			img.SetNRGBA(cellX+x, cellY+4, w)
+		}
+		// Left wall
+		for y := 3; y < 13; y++ {
+			img.SetNRGBA(cellX+3, cellY+y, w)
+			img.SetNRGBA(cellX+4, cellY+y, w)
+		}
+		// Right wall
+		for y := 3; y < 13; y++ {
+			img.SetNRGBA(cellX+11, cellY+y, w)
+			img.SetNRGBA(cellX+12, cellY+y, w)
+		}
+		// Bottom line
+		for x := 3; x < 13; x++ {
+			img.SetNRGBA(cellX+x, cellY+11, w)
+			img.SetNRGBA(cellX+x, cellY+12, w)
+		}
 	}
 }

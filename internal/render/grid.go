@@ -117,3 +117,19 @@ func (r *GridRenderer) Draw(screen *ebiten.Image, buf *CellBuffer) {
 		}
 	}
 }
+
+// DrawFloating renders a single glyph at sub-pixel screen coordinates.
+// Used for entities that move smoothly between tile cells (e.g. ships in system map).
+func (r *GridRenderer) DrawFloating(screen *ebiten.Image, glyph byte, fg uint8, px, py float64) {
+	if glyph == ' ' || glyph == 0 {
+		return
+	}
+	g := r.Atlas.Glyph(glyph)
+	scaleX := float64(r.CellW) / float64(GlyphWidth)
+	scaleY := float64(r.CellH) / float64(GlyphHeight)
+	var op ebiten.DrawImageOptions
+	op.GeoM.Scale(scaleX, scaleY)
+	op.GeoM.Translate(px, py)
+	op.ColorScale.ScaleWithColor(Palette[fg])
+	screen.DrawImage(g, &op)
+}

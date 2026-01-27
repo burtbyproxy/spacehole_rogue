@@ -14,17 +14,27 @@ const (
 type EquipmentKind uint8
 
 const (
-	EquipNone           EquipmentKind = iota
-	EquipConsole                      // piloting/navigation console
-	EquipBed                          // sleeping berth
-	EquipPowerCell                    // energy storage
-	EquipEngine                       // propulsion engine
-	EquipToilet                       // waste processing
-	EquipShower                       // hygiene
-	EquipReplicator                   // food replicator (organic → food)
-	EquipWaterRecycler                // water recycler (dirty → clean)
-	EquipFoodStore                    // food/organic matter storage
-	EquipWaterTank                    // water storage tank
+	EquipNone            EquipmentKind = iota
+	EquipBed                           // sleeping berth
+	EquipLocker                        // storage locker (future)
+	EquipViewscreen                    // displays external view
+	EquipNavConsole                    // navigation station
+	EquipPilotConsole                  // pilot station
+	EquipScienceConsole                // science station
+	EquipCargoConsole                  // cargo management terminal
+	EquipIncinerator                   // waste disposal (future)
+	EquipMedical                       // medical station (future)
+	EquipFoodStation                   // food replicator (clean organic → body)
+	EquipDrinkStation                  // drink replicator (clean water → body)
+	EquipToilet                        // waste processing
+	EquipShower                        // hygiene
+	EquipOrganicTank                   // organic matter storage
+	EquipMatterRecycler                // combined recycler (dirty → clean, water + organic)
+	EquipWaterTank                     // water storage tank
+	EquipEngine                        // propulsion
+	EquipPowerCell                     // energy storage (battery)
+	EquipGenerator                     // power generator
+	EquipCargoTile                     // designated cargo storage pad
 )
 
 // Tile represents a single map tile.
@@ -86,14 +96,24 @@ var tileDescriptions = map[TileKind]string{
 }
 
 var equipDescriptions = map[EquipmentKind]string{
-	EquipConsole:       "Navigation Console - pilot the ship",
-	EquipBed:           "Sleeping Berth - rest to recover",
-	EquipPowerCell:     "Power Cell - stores energy for ship systems",
-	EquipEngine:        "Engine - provides thrust and generates power",
-	EquipToilet:        "Toilet - waste processing",
-	EquipShower:        "Shower - hygiene station",
-	EquipReplicator:    "Food Replicator - converts organic matter to meals",
-	EquipWaterRecycler: "Water Recycler - purifies and recycles water",
-	EquipFoodStore:     "Food Stores - organic matter supply",
-	EquipWaterTank:     "Water Tank - fresh water storage",
+	EquipBed:            "Sleeping Berth - rest to recover",
+	EquipLocker:         "Storage Locker - personal storage",
+	EquipViewscreen:     "Viewscreen - external view display",
+	EquipNavConsole:     "Nav Station - navigation and jump control",
+	EquipPilotConsole:   "Pilot Station - manual flight controls",
+	EquipScienceConsole: "Science Station - sensor analysis",
+	EquipCargoConsole:   "Cargo Console - manage and jettison cargo",
+	EquipIncinerator:    "Incinerator - waste disposal",
+	EquipMedical:        "Medical Station - treat injuries",
+	EquipFoodStation:    "Food Replicator - dispenses meals from clean organics",
+	EquipDrinkStation:   "Drink Replicator - dispenses clean water",
+	EquipToilet:         "Toilet - waste processing",
+	EquipShower:         "Shower - hygiene station",
+	EquipOrganicTank:    "Organic Tank - organic matter storage",
+	EquipMatterRecycler: "Matter Recycler - converts dirty matter to clean",
+	EquipWaterTank:      "Water Tank - fresh water storage",
+	EquipEngine:         "Engine - provides thrust",
+	EquipPowerCell:      "Battery - stores energy for ship systems",
+	EquipGenerator:      "Generator - produces energy",
+	EquipCargoTile:      "Cargo Pad - designated cargo space",
 }

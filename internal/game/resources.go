@@ -17,6 +17,14 @@ func (m *MatterPool) Free() int { return m.Capacity - m.Clean - m.Dirty }
 // MaxBodyFullness is the max matter the player's body can hold.
 const MaxBodyFullness = 30
 
+// RecyclerState tracks the internal buffer of the combined matter recycler.
+// Dirty matter is pulled from ship pools into the buffer, then processed into clean.
+type RecyclerState struct {
+	WaterBuffer   int // dirty water waiting to be processed
+	OrganicBuffer int // dirty organic waiting to be processed
+	Capacity      int // max per type in buffer
+}
+
 // Resources tracks all matter and energy on the shuttle.
 type Resources struct {
 	Water   MatterPool
@@ -25,6 +33,7 @@ type Resources struct {
 	MaxEnergy int
 	Hull    int
 	MaxHull int
+	Recycler RecyclerState
 
 	// Player body — matter "in transit" through the player.
 	// Eating/drinking moves CLEAN matter from ship → body.
@@ -51,12 +60,13 @@ func (r *Resources) TotalWaste() int {
 // Matter is conserved: Water.Clean + Water.Dirty + BodyWater + WasteWater = Water.Capacity
 func NewShuttleResources() Resources {
 	return Resources{
-		Water:   MatterPool{Clean: 78, Dirty: 17, Capacity: 100},
-		Organic: MatterPool{Clean: 55, Dirty: 35, Capacity: 100},
-		Energy:    95,
+		Water:    MatterPool{Clean: 78, Dirty: 17, Capacity: 100},
+		Organic:  MatterPool{Clean: 55, Dirty: 35, Capacity: 100},
+		Energy:   95,
 		MaxEnergy: 100,
-		Hull:    100,
-		MaxHull: 100,
+		Hull:     100,
+		MaxHull:  100,
+		Recycler: RecyclerState{Capacity: 5},
 		// Cryo aftermath: body full of waste, need the toilet
 		WasteOrganic: 10,
 		WasteWater:   5,

@@ -7,17 +7,20 @@ import (
 	"github.com/spacehole-rogue/spacehole_rogue/internal/world"
 )
 
+// Time scale: 1 game day = 20 real minutes = 72,000 ticks at 60 TPS.
+// 1 game hour = 50 real seconds = 3,000 ticks.
+
 // Tick intervals (at 60 TPS)
 const (
-	engineGenInterval       = 60  // engine generates 1 energy per second
-	waterRecyclerInterval   = 100 // converts 1 dirty water → clean, costs 1 energy
-	organicRecyclerInterval = 100 // converts 1 dirty organic → clean, costs 1 energy
-	bodyDigestInterval      = 180 // body converts 1 clean organic → waste every 3 sec
-	bodyWaterInterval       = 120 // body converts 1 clean water → waste every 2 sec
-	hungerInterval          = 180 // hunger rises 1 every 3 sec
-	thirstInterval          = 120 // thirst rises 1 every 2 sec
-	hygieneInterval         = 600 // hygiene worsens 1 every 10 sec
-	warningInterval         = 300 // check warnings every 5 sec
+	generatorInterval       = 60   // generator produces 1 energy per real second
+	recyclerIntakeInterval  = 60   // recycler pulls dirty matter into buffer every 1 sec
+	recyclerProcessInterval = 100  // recycler converts 1 buffered dirty → clean every ~1.7 sec
+	bodyDigestInterval      = 300  // body converts 1 clean organic → waste every 5 sec
+	bodyWaterInterval       = 240  // body converts 1 clean water → waste every 4 sec
+	hungerInterval          = 480  // hunger rises 1 every 8 sec (~13 min 0→100, ~16 game hours)
+	thirstInterval          = 300  // thirst rises 1 every 5 sec (~8 min 0→100, ~10 game hours)
+	hygieneInterval         = 720  // hygiene worsens 1 every 12 sec (~20 min 0→100, ~24 game hours)
+	warningInterval         = 900  // check warnings every 15 sec
 )
 
 // Sim is the game simulation. It owns all gameplay state.
@@ -29,11 +32,16 @@ type Sim struct {
 	Needs     PlayerNeeds
 	Log       *MessageLog
 	Ticks     uint64
+	Sector    *Sector
 
 	// Equipment on/off state
-	EngineOn        bool
-	WaterRecyclerOn bool
-	ReplicatorOn    bool // acts as organic recycler when ON
+	EngineOn    bool
+	GeneratorOn bool
+	RecyclerOn  bool
+
+	// UI signals (set by Interact, cleared by Game after handling)
+	NavActivated   bool
+	PilotActivated bool
 
 	player ecs.Entity
 	posMap *ecs.Map[Position]
@@ -53,7 +61,7 @@ func NewSim(layout *world.ShipLayout) *Sim {
 
 	log := NewMessageLog(50)
 	log.Add("Waking from cryo aboard the Nomad.", MsgInfo)
-	log.Add("All systems online. Engine, recyclers running.", MsgInfo)
+	log.Add("All systems online. Generator, recycler running.", MsgInfo)
 	log.Add("You should probably find the toilet.", MsgWarning)
 
 	return &Sim{
@@ -63,9 +71,10 @@ func NewSim(layout *world.ShipLayout) *Sim {
 		Resources:       NewShuttleResources(),
 		Needs:           PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20},
 		Log:             log,
-		EngineOn:        true,
-		WaterRecyclerOn: true,
-		ReplicatorOn:    true,
+		Sector:          NewSector(42),
+		EngineOn:    true,
+		GeneratorOn: true,
+		RecyclerOn:  true,
 		player:          player,
 		posMap:          posMap,
 	}
@@ -93,42 +102,56 @@ func (s *Sim) TryMovePlayer(dx, dy int) bool {
 // Tick advances the simulation by one step.
 func (s *Sim) Tick() {
 	s.Ticks++
-	s.tickEngine()
-	s.tickRecyclers()
+	s.tickGenerator()
+	s.tickRecycler()
 	s.tickBody()
 	s.tickNeeds()
+	s.tickSystemMapNPCs()
+	s.tickSystemMapShuttle()
 	if s.Ticks%warningInterval == 0 {
 		s.checkWarnings()
 	}
 }
 
-func (s *Sim) tickEngine() {
-	if !s.EngineOn {
+func (s *Sim) tickGenerator() {
+	if !s.GeneratorOn {
 		return
 	}
-	if s.Ticks%engineGenInterval == 0 {
+	if s.Ticks%generatorInterval == 0 {
 		if s.Resources.Energy < s.Resources.MaxEnergy {
 			s.Resources.Energy++
 		}
 	}
 }
 
-func (s *Sim) tickRecyclers() {
+func (s *Sim) tickRecycler() {
+	if !s.RecyclerOn {
+		return
+	}
 	r := &s.Resources
+	rc := &r.Recycler
 
-	// Water recycler: dirty water → clean water, costs 1 energy
-	if s.WaterRecyclerOn && s.Ticks%waterRecyclerInterval == 0 {
-		if r.Water.Dirty > 0 && r.Energy > 0 {
+	// Intake phase: pull dirty matter from ship pools into recycler buffer
+	if s.Ticks%recyclerIntakeInterval == 0 {
+		if r.Water.Dirty > 0 && rc.WaterBuffer < rc.Capacity {
 			r.Water.Dirty--
-			r.Water.Clean++
-			r.Energy--
+			rc.WaterBuffer++
+		}
+		if r.Organic.Dirty > 0 && rc.OrganicBuffer < rc.Capacity {
+			r.Organic.Dirty--
+			rc.OrganicBuffer++
 		}
 	}
 
-	// Replicator as organic recycler: dirty organic → clean organic, costs 1 energy
-	if s.ReplicatorOn && s.Ticks%organicRecyclerInterval == 0 {
-		if r.Organic.Dirty > 0 && r.Energy > 0 {
-			r.Organic.Dirty--
+	// Process phase: convert buffered dirty → clean, costs 1 energy each
+	if s.Ticks%recyclerProcessInterval == 0 {
+		if rc.WaterBuffer > 0 && r.Energy > 0 {
+			rc.WaterBuffer--
+			r.Water.Clean++
+			r.Energy--
+		}
+		if rc.OrganicBuffer > 0 && r.Energy > 0 {
+			rc.OrganicBuffer--
 			r.Organic.Clean++
 			r.Energy--
 		}
@@ -172,6 +195,21 @@ func (s *Sim) tickNeeds() {
 	}
 }
 
+func (s *Sim) tickSystemMapNPCs() {
+	sm := s.Sector.Systems[s.Sector.CurrentSystem].Map
+	if sm != nil {
+		sm.TickNPCs()
+	}
+}
+
+func (s *Sim) tickSystemMapShuttle() {
+	sm := s.Sector.Systems[s.Sector.CurrentSystem].Map
+	if sm != nil {
+		sm.Shuttle.Tick()
+		sm.Shuttle.ClampToBounds(sm.Width, sm.Height)
+	}
+}
+
 func (s *Sim) checkWarnings() {
 	r := &s.Resources
 	n := &s.Needs
@@ -199,7 +237,7 @@ func (s *Sim) checkWarnings() {
 	}
 
 	if n.Hunger >= 80 {
-		s.Log.Add("You're starving. Find the replicator.", MsgCritical)
+		s.Log.Add("You're starving. Find the food station.", MsgCritical)
 	} else if n.Hunger >= 60 {
 		s.Log.Add("Getting hungry.", MsgWarning)
 	}
@@ -222,10 +260,10 @@ func (s *Sim) Interact() {
 	r := &s.Resources
 
 	switch tile.Equipment {
-	case world.EquipReplicator:
+	case world.EquipFoodStation:
 		// Eat: clean organic leaves ship → enters body, hunger drops
 		if r.Organic.Clean < 5 {
-			s.Log.Add("Not enough clean organics to replicate a meal.", MsgWarning)
+			s.Log.Add("Not enough clean organics to dispense a meal.", MsgWarning)
 			return
 		}
 		if r.BodyFullness()+5 > MaxBodyFullness {
@@ -235,9 +273,9 @@ func (s *Sim) Interact() {
 		r.Organic.Clean -= 5
 		r.BodyOrganic += 5
 		s.Needs.Hunger = max(s.Needs.Hunger-35, 0)
-		s.Log.Add("Replicated a meal. Tastes like... Tuesday.", MsgInfo)
+		s.Log.Add("Dispensed a meal. Tastes like... Tuesday.", MsgInfo)
 
-	case world.EquipWaterTank:
+	case world.EquipDrinkStation:
 		// Drink: clean water leaves ship → enters body, thirst drops
 		if r.Water.Clean < 3 {
 			s.Log.Add(fmt.Sprintf("Not enough clean water. %dc %dd.", r.Water.Clean, r.Water.Dirty), MsgWarning)
@@ -280,29 +318,69 @@ func (s *Sim) Interact() {
 	case world.EquipBed:
 		s.Log.Add("You rest briefly. The void doesn't care.", MsgSocial)
 
-	case world.EquipConsole:
-		s.Log.Add("Navigation console online. No destinations yet.", MsgInfo)
+	case world.EquipLocker:
+		s.Log.Add("Storage locker. Empty for now.", MsgSocial)
+
+	case world.EquipNavConsole:
+		s.NavActivated = true
+		s.Log.Add("Navigation console activated.", MsgInfo)
+
+	case world.EquipPilotConsole:
+		s.PilotActivated = true
+		s.Log.Add("Pilot station. Launching system view.", MsgInfo)
+
+	case world.EquipScienceConsole:
+		s.Log.Add("Science station. Deborah usually sits here. She has no idea what she's doing.", MsgSocial)
+
+	case world.EquipIncinerator:
+		s.Log.Add("Incinerator. Not yet operational.", MsgInfo)
+
+	case world.EquipMedical:
+		s.Log.Add("Medical station. Not yet operational.", MsgInfo)
 
 	case world.EquipEngine:
 		status := "OFF"
 		if s.EngineOn {
 			status = "ON"
 		}
-		s.Log.Add(fmt.Sprintf("Engine [%s]. Generates 1 energy/sec.", status), MsgInfo)
+		s.Log.Add(fmt.Sprintf("Engine [%s]. Provides thrust.", status), MsgInfo)
+
+	case world.EquipGenerator:
+		status := "OFF"
+		if s.GeneratorOn {
+			status = "ON"
+		}
+		s.Log.Add(fmt.Sprintf("Generator [%s]. Produces 1 energy/sec.", status), MsgInfo)
 
 	case world.EquipPowerCell:
 		s.Log.Add(fmt.Sprintf("Power cell: %d / %d.", r.Energy, r.MaxEnergy), MsgInfo)
 
-	case world.EquipFoodStore:
-		s.Log.Add(fmt.Sprintf("Organics: %dc %dd. Digesting: %d, waste: %d.",
+	case world.EquipOrganicTank:
+		s.Log.Add(fmt.Sprintf("Organic tank: %dc %dd. Digesting: %d, waste: %d.",
 			r.Organic.Clean, r.Organic.Dirty, r.BodyOrganic, r.WasteOrganic), MsgInfo)
 
-	case world.EquipWaterRecycler:
+	case world.EquipWaterTank:
+		s.Log.Add(fmt.Sprintf("Water tank: %dc %dd. Body: %d, waste: %d.",
+			r.Water.Clean, r.Water.Dirty, r.BodyWater, r.WasteWater), MsgInfo)
+
+	case world.EquipMatterRecycler:
 		status := "OFF"
-		if s.WaterRecyclerOn {
+		if s.RecyclerOn {
 			status = "ON"
 		}
-		s.Log.Add(fmt.Sprintf("Water recycler [%s]. dirty→clean, costs energy.", status), MsgInfo)
+		rc := &r.Recycler
+		s.Log.Add(fmt.Sprintf("Recycler [%s]. Buffer: %dw %do / %d cap.",
+			status, rc.WaterBuffer, rc.OrganicBuffer, rc.Capacity), MsgInfo)
+
+	case world.EquipViewscreen:
+		star := s.Sector.Systems[s.Sector.CurrentSystem]
+		s.Log.Add(fmt.Sprintf("Viewscreen: %s system. %s.", star.Name, StarTypeName(star.Type)), MsgInfo)
+
+	case world.EquipCargoConsole:
+		s.Log.Add("Cargo console. Jettison not yet available.", MsgInfo)
+
+	case world.EquipCargoTile:
+		s.Log.Add("Cargo pad. Empty.", MsgInfo)
 
 	default:
 		s.Log.Add("Nothing to interact with here.", MsgSocial)
@@ -320,26 +398,42 @@ func (s *Sim) ToggleEquipment() {
 		if s.EngineOn {
 			s.Log.Add("Engine started.", MsgInfo)
 		} else {
-			s.Log.Add("Engine shut down. No power generation.", MsgWarning)
+			s.Log.Add("Engine shut down.", MsgWarning)
 		}
 
-	case world.EquipWaterRecycler:
-		s.WaterRecyclerOn = !s.WaterRecyclerOn
-		if s.WaterRecyclerOn {
-			s.Log.Add("Water recycler online.", MsgInfo)
+	case world.EquipGenerator:
+		s.GeneratorOn = !s.GeneratorOn
+		if s.GeneratorOn {
+			s.Log.Add("Generator online. Producing energy.", MsgInfo)
 		} else {
-			s.Log.Add("Water recycler offline. Saving power.", MsgInfo)
+			s.Log.Add("Generator offline. No power generation.", MsgWarning)
 		}
 
-	case world.EquipReplicator:
-		s.ReplicatorOn = !s.ReplicatorOn
-		if s.ReplicatorOn {
-			s.Log.Add("Replicator online. Processing dirty organics.", MsgInfo)
+	case world.EquipMatterRecycler:
+		s.RecyclerOn = !s.RecyclerOn
+		if s.RecyclerOn {
+			s.Log.Add("Recycler online. Processing dirty matter.", MsgInfo)
 		} else {
-			s.Log.Add("Replicator offline. Saving power.", MsgInfo)
+			s.Log.Add("Recycler offline. Saving power.", MsgInfo)
 		}
 
 	default:
 		s.Log.Add("This equipment can't be toggled.", MsgSocial)
 	}
+}
+
+// NavigateTo attempts to jump the shuttle to the target star system.
+func (s *Sim) NavigateTo(targetIdx int) bool {
+	cost := s.Sector.EnergyCostTo(targetIdx)
+	if s.Resources.Energy < cost {
+		s.Log.Add(fmt.Sprintf("Not enough energy. Need %d, have %d.", cost, s.Resources.Energy), MsgWarning)
+		return false
+	}
+	s.Resources.Energy -= cost
+	s.Sector.CurrentSystem = targetIdx
+	s.Sector.Systems[targetIdx].Visited = true
+	s.Sector.EnsureSystemMap(targetIdx)
+	star := s.Sector.Systems[targetIdx]
+	s.Log.Add(fmt.Sprintf("Arrived at %s. %s. Energy: -%d.", star.Name, StarTypeName(star.Type), cost), MsgDiscovery)
+	return true
 }

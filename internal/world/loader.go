@@ -62,26 +62,51 @@ func charToTile(ch rune) Tile {
 		return Tile{Kind: TileFloor}
 	case '+':
 		return Tile{Kind: TileDoor}
-	case '=':
-		return Tile{Kind: TileFloor, Equipment: EquipConsole}
+	// --- crew quarters ---
 	case 'b':
 		return Tile{Kind: TileFloor, Equipment: EquipBed}
-	case 'p':
-		return Tile{Kind: TileFloor, Equipment: EquipPowerCell}
-	case 'E':
-		return Tile{Kind: TileFloor, Equipment: EquipEngine}
+	case 'L':
+		return Tile{Kind: TileFloor, Equipment: EquipLocker}
+	// --- bridge stations ---
+	case 'V':
+		return Tile{Kind: TileFloor, Equipment: EquipViewscreen}
+	case 'N':
+		return Tile{Kind: TileFloor, Equipment: EquipNavConsole}
+	case 'P':
+		return Tile{Kind: TileFloor, Equipment: EquipPilotConsole}
+	case 'S':
+		return Tile{Kind: TileFloor, Equipment: EquipScienceConsole}
+	// --- main deck ---
+	case 'C':
+		return Tile{Kind: TileFloor, Equipment: EquipCargoConsole}
+	case 'I':
+		return Tile{Kind: TileFloor, Equipment: EquipIncinerator}
+	case 'M':
+		return Tile{Kind: TileFloor, Equipment: EquipMedical}
+	case 'F':
+		return Tile{Kind: TileFloor, Equipment: EquipFoodStation}
+	case 'D':
+		return Tile{Kind: TileFloor, Equipment: EquipDrinkStation}
 	case 't':
 		return Tile{Kind: TileFloor, Equipment: EquipToilet}
 	case 's':
 		return Tile{Kind: TileFloor, Equipment: EquipShower}
-	case 'R':
-		return Tile{Kind: TileFloor, Equipment: EquipReplicator}
-	case 'w':
-		return Tile{Kind: TileFloor, Equipment: EquipWaterRecycler}
-	case 'f':
-		return Tile{Kind: TileFloor, Equipment: EquipFoodStore}
+	// --- engineering ---
+	case 'G':
+		return Tile{Kind: TileFloor, Equipment: EquipOrganicTank}
+	case 'r':
+		return Tile{Kind: TileFloor, Equipment: EquipMatterRecycler}
 	case 'W':
 		return Tile{Kind: TileFloor, Equipment: EquipWaterTank}
+	case 'E':
+		return Tile{Kind: TileFloor, Equipment: EquipEngine}
+	case 'p':
+		return Tile{Kind: TileFloor, Equipment: EquipPowerCell}
+	case 'g':
+		return Tile{Kind: TileFloor, Equipment: EquipGenerator}
+	// --- cargo ---
+	case 'c':
+		return Tile{Kind: TileFloor, Equipment: EquipCargoTile}
 	default:
 		return Tile{Kind: TileVoid}
 	}
