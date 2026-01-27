@@ -1,0 +1,29 @@
+{
+  "name": "Shuttle Nomad",
+  "class": "shuttle",
+  "width": 11,
+  "height": 13,
+  "tiles": [
+    "###########",
+    "#....=....#",
+    "#.........#",
+    "#####+#####",
+    "#.........#",
+    "#....b....#",
+    "###+###+###",
+    "#t..#...R.#",
+    "#.s.+.w.f.#",
+    "###+###+###",
+    "#.........#",
+    "#.E..p..W.#",
+    "###########"
+  ],
+  "rooms": [
+    {"id": "cockpit", "name": "Cockpit"},
+    {"id": "cabin", "name": "Cabin"},
+    {"id": "head", "name": "Head"},
+    {"id": "galley", "name": "Galley"},
+    {"id": "engine_room", "name": "Engine Room"}
+  ],
+  "spawn": [5, 4]
+}
