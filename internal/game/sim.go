@@ -604,19 +604,16 @@ func (s *Sim) Interact() {
 		s.Log.Add("Use cargo console to incinerate cargo for fuel.", MsgInfo)
 
 	case world.EquipFuelTank:
-		// During prologue, can install shuttle fuel here
-		if s.InPrologue() && !s.PrologueSurface.FuelFound {
-			if s.Resources.Inventory.HasItem(ItemFuelCells) {
-				s.Resources.Inventory.RemoveItem(ItemFuelCells, 1)
+		// Try to fill with a pack from inventory
+		if filled, packName := s.Resources.TryFillTank(world.EquipFuelTank); filled > 0 {
+			s.Log.Add(fmt.Sprintf("Used %s. +%d fuel.", packName, filled), MsgDiscovery)
+			// Prologue objective tracking
+			if s.InPrologue() && !s.PrologueSurface.FuelFound {
 				s.PrologueSurface.MarkObjectiveFound(PrologueObjFuel)
-				s.Log.Add("Installed fuel cells! Tank filled.", MsgDiscovery)
 				s.checkPrologueReady()
-			} else {
-				s.Log.Add("Fuel tank empty. Need fuel cells to fill.", MsgWarning)
 			}
-		} else {
-			s.Log.Add(fmt.Sprintf("Fuel tank: %d/%d.", r.JumpFuel, r.MaxJumpFuel), MsgInfo)
 		}
+		s.Log.Add(fmt.Sprintf("Fuel tank: %d/%d.", r.JumpFuel, r.MaxJumpFuel), MsgInfo)
 
 	case world.EquipMedical:
 		s.Log.Add("Medical station. Not yet operational.", MsgInfo)
@@ -657,25 +654,30 @@ func (s *Sim) Interact() {
 		s.Log.Add(fmt.Sprintf("Cargo Transporter [%s]. Beams cargo from surface.", status), MsgInfo)
 
 	case world.EquipPowerCell:
-		// During prologue, can install power pack here
-		if s.InPrologue() && !s.PrologueSurface.PowerFound {
-			if s.Resources.Inventory.HasItem(ItemPowerPack) {
-				s.Resources.Inventory.RemoveItem(ItemPowerPack, 1)
+		// Try to fill with a pack from inventory
+		if filled, packName := s.Resources.TryFillTank(world.EquipPowerCell); filled > 0 {
+			s.Log.Add(fmt.Sprintf("Used %s. +%d energy.", packName, filled), MsgDiscovery)
+			// Prologue objective tracking
+			if s.InPrologue() && !s.PrologueSurface.PowerFound {
 				s.PrologueSurface.MarkObjectiveFound(PrologueObjPower)
-				s.Log.Add("Installed power pack! Battery charged.", MsgDiscovery)
 				s.checkPrologueReady()
-			} else {
-				s.Log.Add("Battery dead. Need power pack to charge.", MsgWarning)
 			}
-		} else {
-			s.Log.Add(fmt.Sprintf("Power cell: %d / %d.", r.Energy, r.MaxEnergy), MsgInfo)
 		}
+		s.Log.Add(fmt.Sprintf("Power cell: %d/%d.", r.Energy, r.MaxEnergy), MsgInfo)
 
 	case world.EquipOrganicTank:
+		// Try to fill with a pack from inventory
+		if filled, packName := s.Resources.TryFillTank(world.EquipOrganicTank); filled > 0 {
+			s.Log.Add(fmt.Sprintf("Used %s. +%d organics.", packName, filled), MsgDiscovery)
+		}
 		s.Log.Add(fmt.Sprintf("Organic tank: %dc %dd. Digesting: %d, waste: %d.",
 			r.Organic.Clean, r.Organic.Dirty, r.BodyOrganic, r.WasteOrganic), MsgInfo)
 
 	case world.EquipWaterTank:
+		// Try to fill with a pack from inventory
+		if filled, packName := s.Resources.TryFillTank(world.EquipWaterTank); filled > 0 {
+			s.Log.Add(fmt.Sprintf("Used %s. +%d water.", packName, filled), MsgDiscovery)
+		}
 		s.Log.Add(fmt.Sprintf("Water tank: %dc %dd. Body: %d, waste: %d.",
 			r.Water.Clean, r.Water.Dirty, r.BodyWater, r.WasteWater), MsgInfo)
 

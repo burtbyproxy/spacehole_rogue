@@ -1,5 +1,7 @@
 package game
 
+import "github.com/spacehole-rogue/spacehole_rogue/internal/world"
+
 // MatterPool tracks a finite resource that cycles between clean and dirty states.
 // Clean + Dirty + any matter held outside the system = Capacity.
 type MatterPool struct {
@@ -192,4 +194,184 @@ func NeedLevel(val int) string {
 	default:
 		return "CRITICAL"
 	}
+}
+
+// MatterType identifies a type of matter that flows through ship systems.
+type MatterType uint8
+
+const (
+	MatterNone    MatterType = iota
+	MatterPower              // energy/electricity
+	MatterWater              // H2O
+	MatterOrganic            // food/biological matter
+	MatterFuel               // jump drive fuel
+)
+
+// MatterName returns a human-readable name for a matter type.
+func MatterName(m MatterType) string {
+	switch m {
+	case MatterPower:
+		return "power"
+	case MatterWater:
+		return "water"
+	case MatterOrganic:
+		return "organics"
+	case MatterFuel:
+		return "fuel"
+	default:
+		return "unknown"
+	}
+}
+
+// ComponentType identifies the role of equipment in the matter flow system.
+type ComponentType uint8
+
+const (
+	CompNone      ComponentType = iota
+	CompTank                    // stores matter
+	CompGenerator               // produces matter (uses power)
+	CompRecycler                // converts dirty → clean (same matter type)
+	CompOutput                  // dispenses clean matter to player
+	CompInput                   // accepts matter from player (waste)
+	CompConverter               // converts one matter type to another
+)
+
+// EquipmentMatterInfo describes how a piece of equipment interacts with matter.
+type EquipmentMatterInfo struct {
+	Component  ComponentType
+	InputType  MatterType // matter consumed (or MatterNone)
+	OutputType MatterType // matter produced (or MatterNone)
+}
+
+// EquipmentMatter maps equipment to its matter flow behavior.
+// InputType = what it consumes, OutputType = what it produces
+var EquipmentMatter = map[world.EquipmentKind]EquipmentMatterInfo{
+	// Tanks - store a specific matter type
+	world.EquipPowerCell:   {CompTank, MatterNone, MatterPower},
+	world.EquipWaterTank:   {CompTank, MatterNone, MatterWater},
+	world.EquipOrganicTank: {CompTank, MatterNone, MatterOrganic},
+	world.EquipFuelTank:    {CompTank, MatterNone, MatterFuel},
+
+	// Generator - produces power (consumes nothing, just needs to be ON)
+	world.EquipGenerator: {CompGenerator, MatterNone, MatterPower},
+
+	// Recycler - converts dirty → clean (handles both water and organic)
+	// Special case: processes multiple matter types, dirty→clean conversion
+	world.EquipMatterRecycler: {CompRecycler, MatterNone, MatterNone},
+
+	// Outputs (replicators) - dispense clean matter from tanks to player
+	// InputType = what they draw from tanks
+	world.EquipFoodStation:  {CompOutput, MatterOrganic, MatterNone},
+	world.EquipDrinkStation: {CompOutput, MatterWater, MatterNone},
+
+	// Inputs - accept matter from player, output to dirty pools
+	// Toilet: waste from body → dirty water + organic
+	// Shower: clean water → dirty water (hygiene)
+	world.EquipToilet: {CompInput, MatterNone, MatterNone}, // accepts both waste types
+	world.EquipShower: {CompInput, MatterWater, MatterWater}, // clean water in, dirty water out
+
+	// Converters - transform one matter type to another
+	// Incinerator: burns cargo (organic) → produces fuel
+	world.EquipIncinerator: {CompConverter, MatterOrganic, MatterFuel},
+}
+
+// PackFillAmount is how much a single pack replenishes.
+const PackFillAmount = 50
+
+// TankMatterType returns the matter type a tank holds, or MatterNone.
+func TankMatterType(eq world.EquipmentKind) MatterType {
+	if info, ok := EquipmentMatter[eq]; ok && info.Component == CompTank {
+		return info.OutputType
+	}
+	return MatterNone
+}
+
+// OutputMatterType returns the matter type an output dispenses, or MatterNone.
+func OutputMatterType(eq world.EquipmentKind) MatterType {
+	if info, ok := EquipmentMatter[eq]; ok && info.Component == CompOutput {
+		return info.InputType // output dispenses its input type from tanks
+	}
+	return MatterNone
+}
+
+// ConverterMatter returns the input and output matter types for a converter.
+func ConverterMatter(eq world.EquipmentKind) (input, output MatterType) {
+	if info, ok := EquipmentMatter[eq]; ok && info.Component == CompConverter {
+		return info.InputType, info.OutputType
+	}
+	return MatterNone, MatterNone
+}
+
+// PackMatterType returns the matter type a pack contains, or MatterNone.
+func PackMatterType(item ItemKind) MatterType {
+	switch item {
+	case ItemPowerPack:
+		return MatterPower
+	case ItemWaterPack:
+		return MatterWater
+	case ItemRationPack:
+		return MatterOrganic
+	case ItemFuelCells:
+		return MatterFuel
+	default:
+		return MatterNone
+	}
+}
+
+// PackForMatter returns the pack item for a given matter type.
+func PackForMatter(m MatterType) ItemKind {
+	switch m {
+	case MatterPower:
+		return ItemPowerPack
+	case MatterWater:
+		return ItemWaterPack
+	case MatterOrganic:
+		return ItemRationPack
+	case MatterFuel:
+		return ItemFuelCells
+	default:
+		return ItemNone
+	}
+}
+
+// TryFillTank attempts to use a pack from inventory to fill the given tank.
+// Matches pack matter type to tank matter type automatically.
+// Returns (filled amount, pack name) if successful, (0, "") if not.
+func (r *Resources) TryFillTank(eq world.EquipmentKind) (int, string) {
+	matterType := TankMatterType(eq)
+	if matterType == MatterNone {
+		return 0, ""
+	}
+
+	pack := PackForMatter(matterType)
+	if pack == ItemNone || !r.Inventory.HasItem(pack) {
+		return 0, ""
+	}
+
+	var filled int
+	switch matterType {
+	case MatterPower:
+		space := r.MaxEnergy - r.Energy
+		filled = min(PackFillAmount, space)
+		r.Energy += filled
+	case MatterWater:
+		space := r.Water.Capacity - r.Water.Clean - r.Water.Dirty
+		filled = min(PackFillAmount, space)
+		r.Water.Clean += filled
+	case MatterOrganic:
+		space := r.Organic.Capacity - r.Organic.Clean - r.Organic.Dirty
+		filled = min(PackFillAmount, space)
+		r.Organic.Clean += filled
+	case MatterFuel:
+		space := r.MaxJumpFuel - r.JumpFuel
+		filled = min(PackFillAmount, space)
+		r.JumpFuel += filled
+	default:
+		return 0, ""
+	}
+
+	if filled > 0 {
+		r.Inventory.RemoveItem(pack, 1)
+	}
+	return filled, ItemName(pack)
 }
