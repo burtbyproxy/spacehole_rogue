@@ -51,6 +51,7 @@ const (
 	EquipPowerCell                     // energy storage (battery)
 	EquipGenerator                     // power generator
 	EquipFuelTank                      // jump fuel storage
+	EquipJumpDrive                     // FTL jump drive
 	EquipCargoTile                     // designated cargo storage pad
 	// Surface equipment
 	EquipTerminal   // interactable terminal (objective target)
@@ -227,6 +228,7 @@ var equipDescriptions = map[EquipmentKind]string{
 	EquipPowerCell:      "Battery - stores energy for ship systems",
 	EquipGenerator:      "Generator - produces energy",
 	EquipFuelTank:       "Fuel Tank - stores jump fuel",
+	EquipJumpDrive:      "Jump Drive - FTL travel (90 power per jump!)",
 	EquipCargoTile:      "Cargo Pad - designated cargo space",
 	EquipTerminal:       "Terminal - data access point",
 	EquipLootCrate:      "Crate - searchable container",

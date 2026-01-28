@@ -99,6 +99,8 @@ func equipVisuals(eq world.EquipmentKind, on bool) (glyph byte, fg, bg uint8) {
 			return '%', ColorBrown, ColorBlack
 		}
 		return '%', ColorDarkGray, ColorBlack
+	case world.EquipJumpDrive:
+		return 'J', ColorLightMagenta, ColorBlack // jump drive (purple = FTL)
 	// --- cargo ---
 	case world.EquipCargoTile:
 		return 176, ColorDarkGray, ColorBlack // ░ cargo pad

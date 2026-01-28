@@ -64,7 +64,8 @@ var EquipmentTemplates = map[EquipmentKind]EquipmentTemplate{
 	EquipFoodStation:    {EquipFoodStation, PowerOnUse, 2, 1.0},
 	EquipDrinkStation:   {EquipDrinkStation, PowerOnUse, 1, 1.0},
 	EquipIncinerator:    {EquipIncinerator, PowerOnUse, 2, 1.0},
-	EquipToilet:         {EquipToilet, PowerNone, 0, 1.0}, // gravity-fed, no power needed
+	EquipJumpDrive:      {EquipJumpDrive, PowerOnUse, 90, 1.0}, // massive power draw - shut systems down to jump!
+	EquipToilet:         {EquipToilet, PowerNone, 0, 1.0},      // gravity-fed, no power needed
 	EquipShower:         {EquipShower, PowerOnUse, 1, 1.0},
 
 	// --- Surface equipment (no ship power) ---
@@ -168,6 +169,7 @@ var equipmentNames = map[EquipmentKind]string{
 	EquipOrganicTank:     "Organic Tank",
 	EquipWaterTank:       "Water Tank",
 	EquipFuelTank:        "Fuel Tank",
+	EquipJumpDrive:       "Jump Drive",
 	EquipPowerCell:       "Battery",
 	EquipCargoTile:       "Cargo Pad",
 	EquipTerminal:        "Terminal",

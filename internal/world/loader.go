@@ -104,6 +104,10 @@ func charToTile(ch rune) Tile {
 		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipPowerCell)}
 	case 'g':
 		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipGenerator)}
+	case 'f':
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipFuelTank)}
+	case 'J':
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipJumpDrive)}
 	// --- cargo ---
 	case 'c':
 		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipCargoTile)}
