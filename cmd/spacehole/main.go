@@ -267,7 +267,10 @@ func (g *Game) drawShipView() {
 		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
 	}
 
-	// Instructions
+	// Instructions - change based on whether landed
+	if g.sim.IsOnSurface() {
+		buf.WriteString(2, gridRows-2, "LANDED - E at door: Exit  Pilot: Lift off", render.ColorLightGreen, render.ColorBlack)
+	}
 	buf.WriteString(2, gridRows-1, "WASD: Move  E: Interact  T: Toggle  Tab: Status  ESC: Quit", render.ColorDarkGray, render.ColorBlack)
 }
 
@@ -957,7 +960,16 @@ func (g *Game) updateShip() error {
 
 	// Interact / Toggle
 	if inpututil.IsKeyJustPressed(ebiten.KeyE) {
-		g.sim.Interact()
+		// Check if on a door tile - if landed, exit to surface
+		px, py := g.sim.PlayerPos()
+		tile := g.sim.Grid.Get(px, py)
+		if tile.Kind == world.TileDoor && g.sim.IsOnSurface() {
+			if g.sim.ExitShuttle() {
+				g.viewMode = ViewSurface
+			}
+		} else {
+			g.sim.Interact()
+		}
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyT) {
 		g.sim.ToggleEquipment()
@@ -970,17 +982,32 @@ func (g *Game) updateShip() error {
 		g.viewMode = ViewSectorMap
 	}
 
-	// Pilot console → surface (if landed), leave orbit (if orbiting), or system map
-	if g.sim.IsOnSurface() {
-		// Just landed from pilot console — go to surface view
-		g.viewMode = ViewSurface
-	} else if g.sim.PilotActivated {
+	// Pilot console handling when landed on surface
+	if g.sim.PilotActivated {
 		g.sim.PilotActivated = false
-		if g.sim.IsOrbiting() {
+		if g.sim.IsOnSurface() {
+			// Shuttle is landed - use pilot to lift off
+			if g.sim.InPrologue() {
+				if g.sim.PrologueSurface.CheckPrologueComplete() {
+					g.sim.CompletePrologue()
+					g.sim.Sector.EnsureSystemMap(g.sim.Sector.CurrentSystem)
+					g.viewMode = ViewSystemMap
+				} else {
+					g.sim.Log.Add("Shuttle not ready. "+g.sim.PrologueSurface.ObjectiveStatus(), game.MsgWarning)
+				}
+			} else {
+				g.sim.LiftOff()
+				g.sim.Sector.EnsureSystemMap(g.sim.Sector.CurrentSystem)
+				g.viewMode = ViewSystemMap
+			}
+		} else if g.sim.IsOrbiting() {
 			g.sim.LeaveOrbit()
+			g.sim.Sector.EnsureSystemMap(g.sim.Sector.CurrentSystem)
+			g.viewMode = ViewSystemMap
+		} else {
+			g.sim.Sector.EnsureSystemMap(g.sim.Sector.CurrentSystem)
+			g.viewMode = ViewSystemMap
 		}
-		g.sim.Sector.EnsureSystemMap(g.sim.Sector.CurrentSystem)
-		g.viewMode = ViewSystemMap
 	}
 
 	// Cargo console → cargo view (inspect and jettison)
@@ -1924,13 +1951,13 @@ func (g *Game) drawSurfaceView() {
 	// Draw player
 	buf.Set(viewCenterX, viewCenterY, '@', render.ColorWhite, render.ColorBlack)
 
-	// Draw shuttle marker if visible
+	// Draw shuttle marker if visible (bright white on green to stand out)
 	shuttleScreenX := surf.ShuttleX + ox
 	shuttleScreenY := surf.ShuttleY + oy
 	if shuttleScreenX >= 0 && shuttleScreenX < gridCols && shuttleScreenY >= 0 && shuttleScreenY < gridRows {
 		// Don't overwrite if player is standing on it
 		if surf.PlayerX != surf.ShuttleX || surf.PlayerY != surf.ShuttleY {
-			buf.Set(shuttleScreenX, shuttleScreenY, 'H', render.ColorWhite, render.ColorDarkGray)
+			buf.Set(shuttleScreenX, shuttleScreenY, 'H', render.ColorWhite, render.ColorGreen)
 		}
 	}
 
@@ -1946,31 +1973,40 @@ func (g *Game) drawSurfaceView() {
 		locName := game.PrologueLocationName(g.sim.Prologue.Location)
 		buf.WriteString(cx, cy, locName, render.ColorLightCyan, render.ColorBlack)
 		cy += 2
-		// Show prologue objectives
-		buf.WriteString(cx, cy, "Shuttle Needs:", render.ColorYellow, render.ColorBlack)
+		// Show prologue objectives with three states: missing, in cargo, installed
+		buf.WriteString(cx, cy, "Shuttle Repairs:", render.ColorYellow, render.ColorBlack)
 		cy++
 		ps := g.sim.PrologueSurface
 		for _, obj := range g.sim.Prologue.GetObjectives() {
-			found := false
+			installed := false
+			inCargo := false
 			name := ""
 			switch obj {
 			case game.PrologueObjFuel:
-				found = ps.FuelFound
-				name = "Fuel Cells"
+				installed = ps.FuelFound
+				inCargo = g.sim.Resources.FindPad(game.CargoShuttleFuel) >= 0
+				name = "Fuel"
 			case game.PrologueObjParts:
-				found = ps.PartsFound
-				name = "Spare Parts"
+				installed = ps.PartsFound
+				inCargo = g.sim.Resources.FindPad(game.CargoSpareParts) >= 0
+				name = "Parts"
 			case game.PrologueObjPower:
-				found = ps.PowerFound
-				name = "Power Pack"
+				installed = ps.PowerFound
+				inCargo = g.sim.Resources.FindPad(game.CargoShuttlePower) >= 0
+				name = "Power"
 			}
 			status := "[ ]"
 			clr := uint8(render.ColorWhite)
-			if found {
+			hint := ""
+			if installed {
 				status = "[X]"
 				clr = render.ColorGreen
+			} else if inCargo {
+				status = "[~]"
+				clr = render.ColorYellow
+				hint = " (install)"
 			}
-			buf.WriteString(cx, cy, fmt.Sprintf("%s %s", status, name), clr, render.ColorBlack)
+			buf.WriteString(cx, cy, fmt.Sprintf("%s %s%s", status, name, hint), clr, render.ColorBlack)
 			cy++
 		}
 		cy++
@@ -2014,9 +2050,9 @@ func (g *Game) drawSurfaceView() {
 	cy++
 	buf.WriteString(cx, cy, "WASD: Move", render.ColorDarkGray, render.ColorBlack)
 	cy++
-	buf.WriteString(cx, cy, "E: Interact", render.ColorDarkGray, render.ColorBlack)
+	buf.WriteString(cx, cy, "E: Interact/Board", render.ColorDarkGray, render.ColorBlack)
 	cy++
-	buf.WriteString(cx, cy, "At shuttle: Lift off", render.ColorDarkGray, render.ColorBlack)
+	buf.WriteString(cx, cy, "Pilot to lift off", render.ColorDarkGray, render.ColorBlack)
 	cy += 2
 
 	// Show if at shuttle
@@ -2025,7 +2061,7 @@ func (g *Game) drawSurfaceView() {
 			if g.sim.PrologueSurface.CheckPrologueComplete() {
 				buf.WriteString(cx, cy, ">>> SHUTTLE READY <<<", render.ColorLightGreen, render.ColorBlack)
 				cy++
-				buf.WriteString(cx, cy, "Press E to LAUNCH!", render.ColorLightGreen, render.ColorBlack)
+				buf.WriteString(cx, cy, "E to board, then pilot", render.ColorLightGreen, render.ColorBlack)
 			} else {
 				buf.WriteString(cx, cy, ">>> AT SHUTTLE <<<", render.ColorYellow, render.ColorBlack)
 				cy++
@@ -2034,7 +2070,7 @@ func (g *Game) drawSurfaceView() {
 		} else {
 			buf.WriteString(cx, cy, ">>> AT SHUTTLE <<<", render.ColorLightGreen, render.ColorBlack)
 			cy++
-			buf.WriteString(cx, cy, "Press E to lift off", render.ColorLightGreen, render.ColorBlack)
+			buf.WriteString(cx, cy, "E to board", render.ColorLightGreen, render.ColorBlack)
 		}
 	}
 
@@ -2076,23 +2112,10 @@ func (g *Game) updateSurface() error {
 	// Interact
 	if inpututil.IsKeyJustPressed(ebiten.KeyE) {
 		if surf.AtShuttle() {
-			// Check if we're in prologue
-			if g.sim.InPrologue() {
-				if g.sim.PrologueSurface.CheckPrologueComplete() {
-					// Complete prologue and launch
-					g.sim.CompletePrologue()
-					g.viewMode = ViewShip
-					return nil
-				} else {
-					// Can't launch yet
-					g.sim.Log.Add("Shuttle not ready. "+g.sim.PrologueSurface.ObjectiveStatus(), game.MsgWarning)
-				}
-			} else {
-				// Normal surface - lift off
-				g.sim.LiftOff()
-				g.viewMode = ViewShip
-				return nil
-			}
+			// Board the shuttle (doesn't lift off - use pilot console for that)
+			g.sim.BoardShuttle()
+			g.viewMode = ViewShip
+			return nil
 		} else {
 			// Interact with tile
 			if g.sim.InPrologue() {

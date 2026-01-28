@@ -190,12 +190,6 @@ func terrainHazard(terrain world.TerrainType) (byte, uint8, uint8) {
 }
 
 func terrainShuttlePad(terrain world.TerrainType) (byte, uint8, uint8) {
-	switch terrain {
-	case world.TerrainIce:
-		return 'H', ColorWhite, ColorCyan
-	case world.TerrainVolcanic:
-		return 'H', ColorWhite, ColorRed
-	default:
-		return 'H', ColorWhite, ColorDarkGray
-	}
+	// Shuttle pad is always bright white on green to stand out
+	return 'H', ColorWhite, ColorGreen
 }

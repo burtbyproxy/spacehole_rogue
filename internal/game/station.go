@@ -18,7 +18,11 @@ const (
 	CargoCircuitry
 	CargoRareMinerals
 	CargoAlienArtifacts
-	CargoKindCount // sentinel — not a real cargo type
+	// Prologue-specific repair items
+	CargoShuttleFuel   // fuel cells for shuttle tank
+	CargoSpareParts    // engine repair parts
+	CargoShuttlePower  // power pack for battery
+	CargoKindCount     // sentinel — not a real cargo type
 )
 
 // MaxPerPad is the stack limit per cargo pad.
@@ -47,6 +51,9 @@ var cargoTable = [CargoKindCount]cargoEntry{
 	CargoCircuitry:      {"Circuitry", 25},
 	CargoRareMinerals:   {"Rare Minerals", 35},
 	CargoAlienArtifacts: {"Alien Artifacts", 50},
+	CargoShuttleFuel:    {"Shuttle Fuel", 20},
+	CargoSpareParts:     {"Spare Parts", 25},
+	CargoShuttlePower:   {"Power Pack", 15},
 }
 
 // CargoName returns the display name for a cargo kind.

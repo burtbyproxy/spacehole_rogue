@@ -172,6 +172,7 @@ func (s *Sim) InPrologue() bool {
 }
 
 // PrologueInteract handles E key interactions during prologue.
+// Items are picked up into cargo - player must use them at appropriate equipment.
 func (s *Sim) PrologueInteract() {
 	if s.PrologueSurface == nil {
 		return
@@ -181,24 +182,30 @@ func (s *Sim) PrologueInteract() {
 
 	switch tile.Equipment {
 	case world.EquipFuelCell:
-		if !s.PrologueSurface.FuelFound {
-			s.PrologueSurface.MarkObjectiveFound(PrologueObjFuel)
-			s.Log.Add("Found fuel cells! Grabbed them.", MsgDiscovery)
+		added := s.Resources.AddCargo(CargoShuttleFuel, 1)
+		if added > 0 {
+			s.Log.Add("Grabbed fuel cells. Use at fuel tank on shuttle.", MsgDiscovery)
 			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
+		} else {
+			s.Log.Add("Cargo full - can't carry fuel cells.", MsgWarning)
 		}
 
 	case world.EquipSpareParts:
-		if !s.PrologueSurface.PartsFound {
-			s.PrologueSurface.MarkObjectiveFound(PrologueObjParts)
-			s.Log.Add("Found engine parts! This should fix the drive.", MsgDiscovery)
+		added := s.Resources.AddCargo(CargoSpareParts, 1)
+		if added > 0 {
+			s.Log.Add("Grabbed spare parts. Use at engine on shuttle.", MsgDiscovery)
 			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
+		} else {
+			s.Log.Add("Cargo full - can't carry spare parts.", MsgWarning)
 		}
 
 	case world.EquipPowerPack:
-		if !s.PrologueSurface.PowerFound {
-			s.PrologueSurface.MarkObjectiveFound(PrologueObjPower)
-			s.Log.Add("Found a power pack! Shuttle battery can charge now.", MsgDiscovery)
+		added := s.Resources.AddCargo(CargoShuttlePower, 1)
+		if added > 0 {
+			s.Log.Add("Grabbed power pack. Use at battery on shuttle.", MsgDiscovery)
 			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
+		} else {
+			s.Log.Add("Cargo full - can't carry power pack.", MsgWarning)
 		}
 
 	case world.EquipLootCrate:
@@ -216,11 +223,13 @@ func (s *Sim) PrologueInteract() {
 	default:
 		s.Log.Add("Nothing to interact with here.", MsgSocial)
 	}
+}
 
-	// Check if prologue is complete
-	if s.PrologueSurface.CheckPrologueComplete() {
+// checkPrologueReady notifies the player if all repairs are complete.
+func (s *Sim) checkPrologueReady() {
+	if s.PrologueSurface != nil && s.PrologueSurface.CheckPrologueComplete() {
 		s.Log.Add("*** SHUTTLE READY ***", MsgDiscovery)
-		s.Log.Add("Return to the shuttle (H) to launch!", MsgInfo)
+		s.Log.Add("Use the pilot console to launch!", MsgInfo)
 	}
 }
 
@@ -544,15 +553,42 @@ func (s *Sim) Interact() {
 		s.Log.Add(fmt.Sprintf("Fuel tank: %d/%d", s.Resources.JumpFuel, s.Resources.MaxJumpFuel), MsgInfo)
 		s.Log.Add("Use cargo console to incinerate cargo for fuel.", MsgInfo)
 
+	case world.EquipFuelTank:
+		// During prologue, can install shuttle fuel here
+		if s.InPrologue() && !s.PrologueSurface.FuelFound {
+			if s.Resources.FindPad(CargoShuttleFuel) >= 0 {
+				s.Resources.RemoveCargo(CargoShuttleFuel, 1)
+				s.PrologueSurface.MarkObjectiveFound(PrologueObjFuel)
+				s.Log.Add("Installed fuel cells! Tank filled.", MsgDiscovery)
+				s.checkPrologueReady()
+			} else {
+				s.Log.Add("Fuel tank empty. Need shuttle fuel cells to fill.", MsgWarning)
+			}
+		} else {
+			s.Log.Add(fmt.Sprintf("Fuel tank: %d/%d.", r.JumpFuel, r.MaxJumpFuel), MsgInfo)
+		}
+
 	case world.EquipMedical:
 		s.Log.Add("Medical station. Not yet operational.", MsgInfo)
 
 	case world.EquipEngine:
-		status := "OFF"
-		if s.EngineOn {
-			status = "ON"
+		// During prologue, can install spare parts here
+		if s.InPrologue() && !s.PrologueSurface.PartsFound {
+			if s.Resources.FindPad(CargoSpareParts) >= 0 {
+				s.Resources.RemoveCargo(CargoSpareParts, 1)
+				s.PrologueSurface.MarkObjectiveFound(PrologueObjParts)
+				s.Log.Add("Installed spare parts! Engine repaired.", MsgDiscovery)
+				s.checkPrologueReady()
+			} else {
+				s.Log.Add("Engine damaged. Need spare parts to repair.", MsgWarning)
+			}
+		} else {
+			status := "OFF"
+			if s.EngineOn {
+				status = "ON"
+			}
+			s.Log.Add(fmt.Sprintf("Engine [%s]. Provides thrust.", status), MsgInfo)
 		}
-		s.Log.Add(fmt.Sprintf("Engine [%s]. Provides thrust.", status), MsgInfo)
 		s.Skills.AddXP(SkillEngineering, 0.5)
 
 	case world.EquipGenerator:
@@ -564,7 +600,19 @@ func (s *Sim) Interact() {
 		s.Skills.AddXP(SkillEngineering, 0.5)
 
 	case world.EquipPowerCell:
-		s.Log.Add(fmt.Sprintf("Power cell: %d / %d.", r.Energy, r.MaxEnergy), MsgInfo)
+		// During prologue, can install power pack here
+		if s.InPrologue() && !s.PrologueSurface.PowerFound {
+			if s.Resources.FindPad(CargoShuttlePower) >= 0 {
+				s.Resources.RemoveCargo(CargoShuttlePower, 1)
+				s.PrologueSurface.MarkObjectiveFound(PrologueObjPower)
+				s.Log.Add("Installed power pack! Battery charged.", MsgDiscovery)
+				s.checkPrologueReady()
+			} else {
+				s.Log.Add("Battery dead. Need power pack to charge.", MsgWarning)
+			}
+		} else {
+			s.Log.Add(fmt.Sprintf("Power cell: %d / %d.", r.Energy, r.MaxEnergy), MsgInfo)
+		}
 
 	case world.EquipOrganicTank:
 		s.Log.Add(fmt.Sprintf("Organic tank: %dc %dd. Digesting: %d, waste: %d.",
@@ -1130,6 +1178,29 @@ func (s *Sim) SurfaceInteract() {
 	default:
 		s.Log.Add("Nothing to interact with here.", MsgSocial)
 	}
+}
+
+// BoardShuttle transitions from surface to ship interior (shuttle stays on surface).
+func (s *Sim) BoardShuttle() {
+	if s.ActiveSurface == nil {
+		return
+	}
+	s.Log.Add("Boarding the shuttle.", MsgInfo)
+	// ActiveSurface stays set - shuttle is still landed
+}
+
+// ExitShuttle transitions from ship interior back to surface.
+// Returns true if the player successfully exits, false if not landed.
+func (s *Sim) ExitShuttle() bool {
+	if s.ActiveSurface == nil {
+		s.Log.Add("Can't exit - shuttle is in space.", MsgWarning)
+		return false
+	}
+	// Place player at shuttle position on surface
+	s.ActiveSurface.PlayerX = s.ActiveSurface.ShuttleX
+	s.ActiveSurface.PlayerY = s.ActiveSurface.ShuttleY
+	s.Log.Add("Exiting shuttle.", MsgInfo)
+	return true
 }
 
 // LiftOff ends surface exploration and returns to orbit.
