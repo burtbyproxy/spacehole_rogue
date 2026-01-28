@@ -42,10 +42,11 @@ const (
 type ShuttleCondition uint8
 
 const (
-	ShuttleNeedsFuel   ShuttleCondition = iota // has power, just empty tank
-	ShuttleNeedsRepair                         // engine busted, need parts
-	ShuttleNeedsPower                          // dead battery, need to charge
-	ShuttleNeedsAll                            // it's bad - fuel + repair + power
+	ShuttleNeedsFuel        ShuttleCondition = iota // has power, just empty tank
+	ShuttleNeedsRepair                              // engine busted, need parts
+	ShuttleNeedsPower                               // dead battery, need to charge
+	ShuttleNeedsPowerRepair                         // dead battery + busted engine (standard start)
+	ShuttleNeedsAll                                 // it's bad - fuel + repair + power
 )
 
 var prologueLocationNames = map[PrologueLocation]string{
@@ -67,10 +68,11 @@ var strandingDescriptions = map[StrandingReason]string{
 }
 
 var shuttleObjectives = map[ShuttleCondition]string{
-	ShuttleNeedsFuel:   "Find fuel cells to refill the shuttle's tank",
-	ShuttleNeedsRepair: "Find spare parts to repair the shuttle's engine",
-	ShuttleNeedsPower:  "Find a power source to charge the shuttle's battery",
-	ShuttleNeedsAll:    "The shuttle needs everything - fuel, parts, and power",
+	ShuttleNeedsFuel:        "Find fuel cells to refill the shuttle's tank",
+	ShuttleNeedsRepair:      "Find spare parts to repair the shuttle's engine",
+	ShuttleNeedsPower:       "Find a power source to charge the shuttle's battery",
+	ShuttleNeedsPowerRepair: "Find power and spare parts to get the shuttle running",
+	ShuttleNeedsAll:         "The shuttle needs everything - fuel, parts, and power",
 }
 
 // GeneratePrologue creates a randomized starting scenario.
@@ -79,7 +81,8 @@ func GeneratePrologue(seed int64) *PrologueScenario {
 
 	loc := PrologueLocation(rng.IntN(6))
 	strand := StrandingReason(rng.IntN(6))
-	shuttle := ShuttleCondition(rng.IntN(4))
+	// Standard start: dead battery + broken engine (no fuel tank/jump drive yet)
+	shuttle := ShuttleNeedsPowerRepair
 
 	// Some combinations make more sense - adjust
 	// Crashed shuttle + crash site = redundant, pick different location
@@ -114,6 +117,8 @@ func buildPrologueFlavor(loc PrologueLocation, strand StrandingReason, shuttle S
 		shuttleDesc = "You found a shuttle. The engine's shot, but maybe you can scavenge parts."
 	case ShuttleNeedsPower:
 		shuttleDesc = "There's a shuttle here. Dead. The battery's completely drained."
+	case ShuttleNeedsPowerRepair:
+		shuttleDesc = "There's a shuttle here. Dead battery, busted engine. You'll need parts and power to get it running."
 	case ShuttleNeedsAll:
 		shuttleDesc = "You found a shuttle. It's a wreck - needs fuel, parts, and power. But it's your only way out."
 	}
@@ -164,10 +169,12 @@ func (p *PrologueScenario) GetObjectives() []PrologueObjectiveKind {
 		return []PrologueObjectiveKind{PrologueObjParts}
 	case ShuttleNeedsPower:
 		return []PrologueObjectiveKind{PrologueObjPower}
+	case ShuttleNeedsPowerRepair:
+		return []PrologueObjectiveKind{PrologueObjParts, PrologueObjPower}
 	case ShuttleNeedsAll:
 		return []PrologueObjectiveKind{PrologueObjFuel, PrologueObjParts, PrologueObjPower}
 	default:
-		return []PrologueObjectiveKind{PrologueObjFuel}
+		return []PrologueObjectiveKind{PrologueObjParts, PrologueObjPower}
 	}
 }
 

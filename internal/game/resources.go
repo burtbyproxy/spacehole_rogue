@@ -276,7 +276,8 @@ var EquipmentMatter = map[world.EquipmentKind]EquipmentMatterInfo{
 }
 
 // PackFillAmount is how much a single pack replenishes.
-const PackFillAmount = 50
+// Small amount since these are carryable personal items.
+const PackFillAmount = 5
 
 // TankMatterType returns the matter type a tank holds, or MatterNone.
 func TankMatterType(eq world.EquipmentKind) MatterType {
