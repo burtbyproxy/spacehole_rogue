@@ -71,6 +71,8 @@ func equipVisuals(eq world.EquipmentKind) (glyph byte, fg, bg uint8) {
 		return 254, ColorBlue, ColorBlack // ■ water tank (blue)
 	case world.EquipPowerCell:
 		return 254, ColorBrown, ColorBlack // ■ battery (gold)
+	case world.EquipFuelTank:
+		return 254, ColorLightMagenta, ColorBlack // ■ fuel tank (purple = jump juice)
 	// --- processors: all ▒ with color variant ---
 	case world.EquipMatterRecycler:
 		return 177, ColorLightMagenta, ColorBlack // ▒ recycler (magenta)
@@ -89,6 +91,13 @@ func equipVisuals(eq world.EquipmentKind) (glyph byte, fg, bg uint8) {
 		return 'L', ColorBrown, ColorBlack // loot crate
 	case world.EquipObjective:
 		return '*', ColorYellow, ColorBlack // objective marker
+	// --- salvage supplies: all & with color variant ---
+	case world.EquipFuelCell:
+		return '&', ColorLightMagenta, ColorBlack // fuel cells (purple = jump juice)
+	case world.EquipSpareParts:
+		return '&', ColorLightGray, ColorBlack // spare parts (gray = metal)
+	case world.EquipPowerPack:
+		return '&', ColorLightCyan, ColorBlack // power pack (cyan = electric)
 	default:
 		return '?', ColorWhite, ColorBlack
 	}

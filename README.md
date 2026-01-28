@@ -1,24 +1,26 @@
-# SpaceHole Rogue
+# SpaceHole Camper
 
-ASCII space roguelike in Go. Start as nobody, find the legendary USS Monkey Lion, bring it home.
+Space van life roguelike. Scrounge enough fuel for one more jump, camp on hostile worlds, and chase the ghost of a ship you were once crew on.
 
 ```
     *  .  *       .    *         .      *
   .    ____     .         *    .           *
     .-'    '-.      *           .    *
    /  SPACEHOLE  \    .    *         .
-  |    ROGUE     |       .      *        .
+  |    CAMPER    |       .      *        .
    \  ________  /   *         .     *
     '-.____.--'        .   *      .
   .    *     .    *        .   *     .
 ```
 
-Star Trek parody tone. A zebra named Deborah is your Chief Science Officer. She has no idea what she's doing.
+You were a redshirt on the legendary USS Monkey Lion. Something happened. Now you're stranded with a busted shuttle, barely enough fuel for one jump, and a vague memory of where the ship was headed.
+
+Your shuttle is your camper van. Each star system is a pit stop where you need to scrounge enough "juice" to reach the next one. Camp on planets, scavenge derelicts, dodge pirates, and piece together the trail back to the Monkey Lion.
 
 ## Requirements
 
 - Go 1.24 or later
-- A terminal that supports 16-color ANSI (most modern terminals)
+- A terminal that supports 16-color ANSI
 
 ### Platform-specific
 
@@ -37,7 +39,7 @@ sudo dnf install mesa-libGL-devel libXcursor-devel libXrandr-devel libXinerama-d
 
 ## Installation
 
-Clone the repository and build:
+Clone and build:
 
 ```bash
 git clone https://github.com/spacehole-rogue/spacehole_rogue.git
@@ -57,10 +59,23 @@ go install github.com/spacehole-rogue/spacehole_rogue/cmd/spacehole@latest
 ./spacehole
 ```
 
-Or on Windows:
-```
-spacehole.exe
-```
+## Core Loop
+
+1. **Jump** into a new system (uses most of your fuel)
+2. **Scout** the system - scan planets, check for threats
+3. **Find a camp** - planet surface, station, asteroid, derelict
+4. **Survive** - gather resources, repair, rest, handle events
+5. **Solve the episode** - complete the system's quest for fuel
+6. **Upgrade** - better shuttle, better gear, better odds
+7. **Jump** again - toward whatever goal you've chosen
+
+## Goals (Pick Your Own)
+
+- **Find the Monkey Lion** - piece together clues, retrace your steps
+- **Find Home** - navigate back to Earth / Federation space
+- **Become a Pirate King** - join them, lead them, raid ships
+- **Build an Empire** - claim a station, establish trade routes
+- **Just Survive** - no goal, pure sandbox, the journey is the point
 
 ## Controls
 
@@ -68,55 +83,57 @@ spacehole.exe
 | Key | Action |
 |-----|--------|
 | WASD / Arrows | Move |
-| E | Interact with equipment |
-| T | Toggle equipment on/off |
+| E | Interact |
+| T | Toggle equipment |
 | Tab | Character sheet |
 | ESC | Quit |
 
-### System Map (Flying)
+### System Map
 | Key | Action |
 |-----|--------|
-| WASD / Arrows | Fly shuttle |
-| E | Interact (orbit planet, dock station, scan) |
-| N | Open sector navigation map |
+| WASD / Arrows | Fly |
+| E | Interact (orbit, dock, scan) |
+| N | Sector navigation |
 | Tab | Character sheet |
 | ESC | Return to ship |
 
-### Sector Map (Navigation)
-| Key | Action |
-|-----|--------|
-| WASD / Arrows | Move cursor |
-| E / Enter | Jump to selected system |
-| ESC | Cancel |
-
-### Surface Exploration
+### Surface / Camps
 | Key | Action |
 |-----|--------|
 | WASD / Arrows | Move |
-| E | Interact (terminals, crates, shuttle) |
+| E | Interact |
 | Tab | Character sheet |
-| ESC | Info |
 
-## Gameplay Loop
+## Survival
 
-1. Explore your ship, manage resources (water, organics, energy)
-2. Use the pilot station to fly around the star system
-3. Scan planets from orbit using the science station
-4. Land on planets with points of interest
-5. Complete objectives, loot crates, return to shuttle
-6. Jump to new systems via the nav console
-7. Find clues about the legendary USS Monkey Lion
+Your shuttle needs:
+- **Jump Fuel** - can't leave the system without it
+- **Energy** - powers systems and life support
+- **Water** - drinking, hygiene, coolant
+- **Organics** - food and medical supplies
+
+You need:
+- **Food & Water** - or you starve
+- **Hygiene** - or morale tanks
+- **Rest** - or fatigue catches up
+
+Where you camp matters:
+- **Planets** need the right gear (thermal for ice/volcanic)
+- **Stations** are safe but cost credits
+- **Derelicts** have salvage but... what killed the crew?
+- **Open space** means pirates will find you
 
 ## Status
 
-Early development. Core systems working:
-- Ship interior exploration with resource management
-- System map flight with planets, stations, derelicts
-- Planet scanning and orbital mechanics
-- Surface exploration with procedural terrain and structures
-- Encounter system with hails and episodes
+Early development. Working systems:
+- Ship interior with resource management
+- System map flight and scanning
+- Planet surface exploration
+- Episode/encounter framework
 - Skill progression
+
+See [planning/CAMPER_DESIGN.md](planning/CAMPER_DESIGN.md) for the full design doc.
 
 ---
 
-*"The Deborah in Cargo Bay B is eating your supplies. She is a zebra. She doesn't understand inventory management."*
+*"Your thermal gear will last maybe an hour in this cold. The pirate frigate is still in orbit. You check the scanner one more time. The fuel depot is 3 klicks north, under the glacier. You're not dying on this frozen rock."*

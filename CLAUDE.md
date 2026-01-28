@@ -1,8 +1,8 @@
-# SpaceHole Rogue
+# SpaceHole Camper
 
-ASCII space roguelike in Go. Start as nobody, find the legendary USS Monkey Lion, bring it home.
+ASCII space survival roguelike in Go. You're a stranded redshirt with a busted shuttle, scrounging fuel one jump at a time.
 
-Star Trek parody tone. A zebra named Deborah is your Chief Science Officer. She has no idea what she's doing.
+Star Trek parody tone. The USS Monkey Lion is out there somewhere - you were crew once. Now you're just trying to survive.
 
 ---
 
@@ -10,10 +10,11 @@ Star Trek parody tone. A zebra named Deborah is your Chief Science Officer. She 
 
 | Document | Purpose |
 |----------|---------|
-| [planning/DESIGN.md](planning/DESIGN.md) | Game vision, design pillars, gameplay loops, story structure |
-| [planning/ARCHITECTURE.md](planning/ARCHITECTURE.md) | Tech stack, directory structure, ECS components, system execution order |
-| [planning/SYSTEMS.md](planning/SYSTEMS.md) | Matter flow, skills, alerts, episodes, races — the mechanics reference |
-| [planning/PHASES.md](planning/PHASES.md) | Implementation roadmap with verification milestones |
+| [planning/CAMPER_DESIGN.md](planning/CAMPER_DESIGN.md) | **Current direction** - space camper survival loop, goals, camping mechanics |
+| [planning/DESIGN.md](planning/DESIGN.md) | Original vision (ML lore, races, episodes) |
+| [planning/ARCHITECTURE.md](planning/ARCHITECTURE.md) | Tech stack, directory structure, ECS components |
+| [planning/SYSTEMS.md](planning/SYSTEMS.md) | Matter flow, skills, alerts, episodes, races |
+| [planning/PHASES.md](planning/PHASES.md) | Implementation roadmap |
 
 ### Implementation Specs
 
@@ -27,16 +28,16 @@ Star Trek parody tone. A zebra named Deborah is your Chief Science Officer. She 
 
 ## The Pitch
 
-The game should FEEL like a hardcore simulation but PLAY like a fun roguelike.
+Space van life roguelike. Each jump costs nearly all your fuel - you're stranded until you solve the system's problem.
 
 **Design Pillars:**
-1. The game teaches itself through ship scale (shuttle → small ship → ML)
-2. Automate the routine, dramatize the exceptions
-3. "One more system" is the addiction
-4. Crew you care about
+1. Jump fuel is the critical gate - can't leave without it
+2. Where you camp matters - planet type, threat level, gear requirements
+3. "One more jump" is the addiction
+4. Sandbox goals - find the ML, find home, become a pirate, or just survive
 5. Meaningful scarcity
 
-**Core Loop:** Pick destination → Travel → Episode → Reward → Maintain → Repeat
+**Core Loop:** Jump → Stranded → Find Camp → Survive/Gather → Solve Episode → Upgrade → Jump
 
 ---
 
@@ -84,6 +85,6 @@ planning/                      ← Design docs (you are here)
 
 ## The Vibe
 
-> "The Deborah in Cargo Bay B is eating your supplies. She is a zebra. She doesn't understand inventory management."
+> "Your thermal gear will last maybe an hour in this cold. The scanner says there's a fuel depot 3 klicks north, under the glacier. The pirate frigate is still in orbit. You're not dying on this frozen rock."
 
 That's the game.

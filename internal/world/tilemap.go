@@ -49,11 +49,16 @@ const (
 	EquipEngine                        // propulsion
 	EquipPowerCell                     // energy storage (battery)
 	EquipGenerator                     // power generator
+	EquipFuelTank                      // jump fuel storage
 	EquipCargoTile                     // designated cargo storage pad
 	// Surface equipment
 	EquipTerminal   // interactable terminal (objective target)
 	EquipLootCrate  // searchable container
 	EquipObjective  // glowing objective marker
+	// Prologue objectives
+	EquipFuelCell   // fuel cells for shuttle
+	EquipSpareParts // engine parts for repair
+	EquipPowerPack  // power cell for charging
 )
 
 // Tile represents a single map tile.
@@ -143,8 +148,12 @@ var equipDescriptions = map[EquipmentKind]string{
 	EquipEngine:         "Engine - provides thrust",
 	EquipPowerCell:      "Battery - stores energy for ship systems",
 	EquipGenerator:      "Generator - produces energy",
+	EquipFuelTank:       "Fuel Tank - stores jump fuel",
 	EquipCargoTile:      "Cargo Pad - designated cargo space",
 	EquipTerminal:       "Terminal - data access point",
 	EquipLootCrate:      "Crate - searchable container",
 	EquipObjective:      "Objective - mission target",
+	EquipFuelCell:       "Fuel Cells - shuttle fuel supply",
+	EquipSpareParts:     "Spare Parts - engine components",
+	EquipPowerPack:      "Power Pack - portable battery",
 }

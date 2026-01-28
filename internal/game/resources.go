@@ -35,6 +35,11 @@ type Resources struct {
 	MaxHull int
 	Recycler RecyclerState
 
+	// Jump fuel — separate from energy, used for FTL jumps
+	// Incinerator converts matter → fuel
+	JumpFuel    int
+	MaxJumpFuel int
+
 	// Player body — matter "in transit" through the player.
 	// Eating/drinking moves CLEAN matter from ship → body.
 	// Body slowly processes clean → dirty (waste).
@@ -71,6 +76,9 @@ func NewShuttleResources() Resources {
 		Hull:     100,
 		MaxHull:  100,
 		Recycler: RecyclerState{Capacity: 5},
+		// Jump fuel — starts with just enough for one jump
+		JumpFuel:    100, // one jump costs ~90
+		MaxJumpFuel: 100,
 		// Cryo aftermath: body full of waste, need the toilet
 		WasteOrganic: 10,
 		WasteWater:   5,

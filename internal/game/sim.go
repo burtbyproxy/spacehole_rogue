@@ -56,6 +56,10 @@ type Sim struct {
 	// Surface exploration state
 	ActiveSurface *SurfaceMap // nil when not on surface
 
+	// Prologue state — starting scenario
+	Prologue        *PrologueScenario // generated starting scenario
+	PrologueSurface *PrologueSurface  // starting map (nil after prologue complete)
+
 	// UI signals (set by Interact, cleared by Game after handling)
 	NavActivated    bool
 	PilotActivated  bool
@@ -109,6 +113,144 @@ func NewSim(layout *world.ShipLayout) *Sim {
 		player:         player,
 		posMap:         posMap,
 	}
+}
+
+// NewSimWithPrologue creates a simulation starting with the prologue scenario.
+func NewSimWithPrologue(layout *world.ShipLayout, seed int64) *Sim {
+	w := ecs.NewWorld(256)
+	grid := layout.ToTileGrid()
+
+	posMap := ecs.NewMap[Position](w)
+
+	// Player starts at shuttle spawn but will move to surface
+	player := ecs.NewMap2[Position, PlayerControlled](w).NewEntity(
+		&Position{X: layout.SpawnX(), Y: layout.SpawnY()},
+		&PlayerControlled{},
+	)
+
+	log := NewMessageLog(50)
+
+	// Generate prologue scenario
+	prologue := GeneratePrologue(seed)
+	prologueSurface := GeneratePrologueMap(prologue, seed)
+
+	// Log the prologue flavor
+	log.Add("--- PROLOGUE ---", MsgDiscovery)
+	log.Add(prologueLocationNames[prologue.Location], MsgInfo)
+	log.Add(strandingDescriptions[prologue.Stranding], MsgInfo)
+	log.Add(prologue.Objective, MsgWarning)
+
+	sector := NewSector(seed)
+	disc := NewDiscoveryLog()
+	// Don't mark any system as visited yet - we're stranded before reaching one
+	disc.TotalSystemsVisited = 0
+
+	return &Sim{
+		ECS:             w,
+		Grid:            grid,
+		Layout:          layout,
+		Resources:       NewShuttleResources(),
+		Needs:           PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20},
+		Log:             log,
+		Sector:          sector,
+		Discovery:       disc,
+		EngineOn:        false, // shuttle is broken
+		GeneratorOn:     false,
+		RecyclerOn:      false,
+		OrbitPlanetIdx:  -1,
+		Prologue:        prologue,
+		PrologueSurface: prologueSurface,
+		ActiveSurface:   prologueSurface.SurfaceMap, // start on surface
+		player:          player,
+		posMap:          posMap,
+	}
+}
+
+// InPrologue returns true if the player is still in the starting prologue.
+func (s *Sim) InPrologue() bool {
+	return s.PrologueSurface != nil
+}
+
+// PrologueInteract handles E key interactions during prologue.
+func (s *Sim) PrologueInteract() {
+	if s.PrologueSurface == nil {
+		return
+	}
+	surf := s.PrologueSurface.SurfaceMap
+	tile := surf.GetTile(surf.PlayerX, surf.PlayerY)
+
+	switch tile.Equipment {
+	case world.EquipFuelCell:
+		if !s.PrologueSurface.FuelFound {
+			s.PrologueSurface.MarkObjectiveFound(PrologueObjFuel)
+			s.Log.Add("Found fuel cells! Grabbed them.", MsgDiscovery)
+			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
+		}
+
+	case world.EquipSpareParts:
+		if !s.PrologueSurface.PartsFound {
+			s.PrologueSurface.MarkObjectiveFound(PrologueObjParts)
+			s.Log.Add("Found engine parts! This should fix the drive.", MsgDiscovery)
+			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
+		}
+
+	case world.EquipPowerPack:
+		if !s.PrologueSurface.PowerFound {
+			s.PrologueSurface.MarkObjectiveFound(PrologueObjPower)
+			s.Log.Add("Found a power pack! Shuttle battery can charge now.", MsgDiscovery)
+			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
+		}
+
+	case world.EquipLootCrate:
+		// Same as regular surface loot
+		s.PrologueSurface.LootCollected++
+		cargoKind := CargoKind(CargoScrapMetal + CargoKind(s.PrologueSurface.LootCollected%5))
+		added := s.Resources.AddCargo(cargoKind, 1)
+		if added > 0 {
+			s.Log.Add(fmt.Sprintf("Found %s in the crate!", CargoName(cargoKind)), MsgDiscovery)
+		} else {
+			s.Log.Add("Crate searched. Cargo full.", MsgWarning)
+		}
+		surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: world.TileFloor})
+
+	default:
+		s.Log.Add("Nothing to interact with here.", MsgSocial)
+	}
+
+	// Check if prologue is complete
+	if s.PrologueSurface.CheckPrologueComplete() {
+		s.Log.Add("*** SHUTTLE READY ***", MsgDiscovery)
+		s.Log.Add("Return to the shuttle (H) to launch!", MsgInfo)
+	}
+}
+
+// CompletePrologue ends the prologue and starts the real game.
+func (s *Sim) CompletePrologue() {
+	if s.PrologueSurface == nil {
+		return
+	}
+
+	s.Log.Add("=== PROLOGUE COMPLETE ===", MsgDiscovery)
+	s.Log.Add("Shuttle systems online. Time to get off this rock.", MsgInfo)
+	s.Log.Add("The Monkey Lion is out there somewhere...", MsgInfo)
+
+	// Enable shuttle systems
+	s.EngineOn = true
+	s.GeneratorOn = true
+	s.RecyclerOn = true
+
+	// Give starting fuel (just enough for one jump)
+	s.Resources.Energy = s.Resources.MaxEnergy / 2
+
+	// Clear prologue state
+	s.PrologueSurface = nil
+	s.ActiveSurface = nil
+
+	// Mark first system as visited
+	s.Discovery.SystemsVisited[s.Sector.CurrentSystem] = true
+	s.Discovery.TotalSystemsVisited = 1
+	s.Discovery.StarTypesSeen[int(s.Sector.Systems[s.Sector.CurrentSystem].Type)] = true
+	s.Discovery.TotalStarTypesSeen = 1
 }
 
 // PlayerPos returns the player's current tile coordinates.
@@ -398,7 +540,9 @@ func (s *Sim) Interact() {
 		}
 
 	case world.EquipIncinerator:
-		s.Log.Add("Incinerator. Not yet operational.", MsgInfo)
+		// Incinerator shows fuel status, actual conversion happens via cargo console
+		s.Log.Add(fmt.Sprintf("Fuel tank: %d/%d", s.Resources.JumpFuel, s.Resources.MaxJumpFuel), MsgInfo)
+		s.Log.Add("Use cargo console to incinerate cargo for fuel.", MsgInfo)
 
 	case world.EquipMedical:
 		s.Log.Add("Medical station. Not yet operational.", MsgInfo)
@@ -617,6 +761,37 @@ func (s *Sim) JettisonCargo(padIdx int) bool {
 		pad.Kind = CargoNone
 	}
 	s.Log.Add(fmt.Sprintf("Jettisoned 1x %s into the void.", name), MsgWarning)
+	return true
+}
+
+// IncinerateCargo burns one unit from the given pad and converts it to jump fuel.
+func (s *Sim) IncinerateCargo(padIdx int) bool {
+	if padIdx < 0 || padIdx >= len(s.Resources.CargoPads) {
+		return false
+	}
+	pad := &s.Resources.CargoPads[padIdx]
+	if pad.Kind == CargoNone || pad.Count <= 0 {
+		s.Log.Add("That pad is empty.", MsgWarning)
+		return false
+	}
+	if s.Resources.JumpFuel >= s.Resources.MaxJumpFuel {
+		s.Log.Add("Fuel tank already full.", MsgWarning)
+		return false
+	}
+	name := CargoName(pad.Kind)
+	pad.Count--
+	if pad.Count == 0 {
+		pad.Kind = CargoNone
+	}
+	// Convert to fuel
+	fuelGained := 15 // base fuel per cargo unit
+	s.Resources.JumpFuel += fuelGained
+	if s.Resources.JumpFuel > s.Resources.MaxJumpFuel {
+		s.Resources.JumpFuel = s.Resources.MaxJumpFuel
+	}
+	s.Log.Add(fmt.Sprintf("Burned 1x %s -> +%d fuel. Tank: %d/%d",
+		name, fuelGained, s.Resources.JumpFuel, s.Resources.MaxJumpFuel), MsgInfo)
+	s.Skills.AddXP(SkillEngineering, 0.5)
 	return true
 }
 

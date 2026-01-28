@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -103,13 +104,16 @@ func NewGame() *Game {
 		log.Fatalf("parse shuttle: %v", err)
 	}
 
-	sim := game.NewSim(layout)
+	// Generate a seed from current time for this run
+	seed := time.Now().UnixNano()
+	sim := game.NewSimWithPrologue(layout, seed)
 
 	g := &Game{
 		atlas:    atlas,
 		renderer: renderer,
 		buffer:   buffer,
 		sim:      sim,
+		viewMode: ViewSurface, // Start on surface during prologue
 	}
 
 	g.drawScreen()
@@ -1567,10 +1571,22 @@ func (g *Game) drawCargoView() {
 		row++
 	}
 
-	row += 1
-	buf.WriteString(cx, row, fmt.Sprintf("Credits: %d", r.Credits), render.ColorLightCyan, render.ColorBlack)
 	row += 2
-	buf.WriteString(cx, row, "Press 1-9 to jettison 1 unit from pad", render.ColorYellow, render.ColorBlack)
+	buf.WriteString(cx, row, fmt.Sprintf("Credits: %d", r.Credits), render.ColorLightCyan, render.ColorBlack)
+	row++
+	// Fuel tank status
+	fuelClr := uint8(render.ColorRed)
+	if r.JumpFuel > r.MaxJumpFuel/2 {
+		fuelClr = render.ColorYellow
+	}
+	if r.JumpFuel >= r.MaxJumpFuel*9/10 {
+		fuelClr = render.ColorLightGreen
+	}
+	buf.WriteString(cx, row, fmt.Sprintf("Jump Fuel: %d/%d", r.JumpFuel, r.MaxJumpFuel), fuelClr, render.ColorBlack)
+	row += 2
+	buf.WriteString(cx, row, "1-9: Incinerate (cargo -> fuel)", render.ColorYellow, render.ColorBlack)
+	row++
+	buf.WriteString(cx, row, "Shift+1-9: Jettison (throw away)", render.ColorDarkGray, render.ColorBlack)
 
 	// Comms log
 	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
@@ -1580,7 +1596,7 @@ func (g *Game) drawCargoView() {
 		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
 	}
 
-	buf.WriteString(2, gridRows-1, "1-9: Jettison from pad  ESC: Back", render.ColorDarkGray, render.ColorBlack)
+	buf.WriteString(2, gridRows-1, "1-9: Incinerate  Shift+1-9: Jettison  ESC: Back", render.ColorDarkGray, render.ColorBlack)
 }
 
 func (g *Game) updateCargo() error {
@@ -1591,9 +1607,17 @@ func (g *Game) updateCargo() error {
 	}
 
 	r := &g.sim.Resources
+	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
+
 	for i := range r.CargoPads {
 		if pressedDigit(i + 1) {
-			g.sim.JettisonCargo(i)
+			if shift {
+				// Jettison (throw away)
+				g.sim.JettisonCargo(i)
+			} else {
+				// Incinerate (convert to fuel)
+				g.sim.IncinerateCargo(i)
+			}
 			break
 		}
 	}
@@ -1914,26 +1938,62 @@ func (g *Game) drawSurfaceView() {
 	cx := panelX
 	cy := 2
 
-	buf.WriteString(cx, cy, "=== SURFACE ===", render.ColorYellow, render.ColorBlack)
-	cy += 2
-
-	// Location info
-	buf.WriteString(cx, cy, fmt.Sprintf("POI: %s", surf.POI), render.ColorLightCyan, render.ColorBlack)
-	cy += 2
-
-	// Objective
-	if surf.Objective != nil {
-		obj := surf.Objective
-		objClr := uint8(render.ColorWhite)
-		status := "[ ]"
-		if obj.Complete {
-			objClr = uint8(render.ColorGreen)
-			status = "[X]"
-		}
-		buf.WriteString(cx, cy, "Objective:", render.ColorYellow, render.ColorBlack)
-		cy++
-		buf.WriteString(cx, cy, fmt.Sprintf("%s %s", status, obj.Description), objClr, render.ColorBlack)
+	// Title changes based on prologue or regular surface
+	if g.sim.InPrologue() {
+		buf.WriteString(cx, cy, "=== PROLOGUE ===", render.ColorYellow, render.ColorBlack)
 		cy += 2
+		// Show location
+		locName := game.PrologueLocationName(g.sim.Prologue.Location)
+		buf.WriteString(cx, cy, locName, render.ColorLightCyan, render.ColorBlack)
+		cy += 2
+		// Show prologue objectives
+		buf.WriteString(cx, cy, "Shuttle Needs:", render.ColorYellow, render.ColorBlack)
+		cy++
+		ps := g.sim.PrologueSurface
+		for _, obj := range g.sim.Prologue.GetObjectives() {
+			found := false
+			name := ""
+			switch obj {
+			case game.PrologueObjFuel:
+				found = ps.FuelFound
+				name = "Fuel Cells"
+			case game.PrologueObjParts:
+				found = ps.PartsFound
+				name = "Spare Parts"
+			case game.PrologueObjPower:
+				found = ps.PowerFound
+				name = "Power Pack"
+			}
+			status := "[ ]"
+			clr := uint8(render.ColorWhite)
+			if found {
+				status = "[X]"
+				clr = render.ColorGreen
+			}
+			buf.WriteString(cx, cy, fmt.Sprintf("%s %s", status, name), clr, render.ColorBlack)
+			cy++
+		}
+		cy++
+	} else {
+		buf.WriteString(cx, cy, "=== SURFACE ===", render.ColorYellow, render.ColorBlack)
+		cy += 2
+		// Location info
+		buf.WriteString(cx, cy, fmt.Sprintf("POI: %s", surf.POI), render.ColorLightCyan, render.ColorBlack)
+		cy += 2
+		// Objective
+		if surf.Objective != nil {
+			obj := surf.Objective
+			objClr := uint8(render.ColorWhite)
+			status := "[ ]"
+			if obj.Complete {
+				objClr = uint8(render.ColorGreen)
+				status = "[X]"
+			}
+			buf.WriteString(cx, cy, "Objective:", render.ColorYellow, render.ColorBlack)
+			cy++
+			buf.WriteString(cx, cy, fmt.Sprintf("%s %s", status, obj.Description), objClr, render.ColorBlack)
+			cy += 2
+		}
 	}
 
 	// Loot collected
@@ -1961,9 +2021,21 @@ func (g *Game) drawSurfaceView() {
 
 	// Show if at shuttle
 	if surf.AtShuttle() {
-		buf.WriteString(cx, cy, ">>> AT SHUTTLE <<<", render.ColorLightGreen, render.ColorBlack)
-		cy++
-		buf.WriteString(cx, cy, "Press E to lift off", render.ColorLightGreen, render.ColorBlack)
+		if g.sim.InPrologue() {
+			if g.sim.PrologueSurface.CheckPrologueComplete() {
+				buf.WriteString(cx, cy, ">>> SHUTTLE READY <<<", render.ColorLightGreen, render.ColorBlack)
+				cy++
+				buf.WriteString(cx, cy, "Press E to LAUNCH!", render.ColorLightGreen, render.ColorBlack)
+			} else {
+				buf.WriteString(cx, cy, ">>> AT SHUTTLE <<<", render.ColorYellow, render.ColorBlack)
+				cy++
+				buf.WriteString(cx, cy, "Not ready yet...", render.ColorYellow, render.ColorBlack)
+			}
+		} else {
+			buf.WriteString(cx, cy, ">>> AT SHUTTLE <<<", render.ColorLightGreen, render.ColorBlack)
+			cy++
+			buf.WriteString(cx, cy, "Press E to lift off", render.ColorLightGreen, render.ColorBlack)
+		}
 	}
 
 	// --- Comms log ---
@@ -2004,12 +2076,31 @@ func (g *Game) updateSurface() error {
 	// Interact
 	if inpututil.IsKeyJustPressed(ebiten.KeyE) {
 		if surf.AtShuttle() {
-			// Lift off
-			g.sim.LiftOff()
-			g.viewMode = ViewShip
-			return nil
+			// Check if we're in prologue
+			if g.sim.InPrologue() {
+				if g.sim.PrologueSurface.CheckPrologueComplete() {
+					// Complete prologue and launch
+					g.sim.CompletePrologue()
+					g.viewMode = ViewShip
+					return nil
+				} else {
+					// Can't launch yet
+					g.sim.Log.Add("Shuttle not ready. "+g.sim.PrologueSurface.ObjectiveStatus(), game.MsgWarning)
+				}
+			} else {
+				// Normal surface - lift off
+				g.sim.LiftOff()
+				g.viewMode = ViewShip
+				return nil
+			}
+		} else {
+			// Interact with tile
+			if g.sim.InPrologue() {
+				g.sim.PrologueInteract()
+			} else {
+				g.sim.SurfaceInteract()
+			}
 		}
-		g.sim.SurfaceInteract()
 	}
 
 	// ESC shows reminder
