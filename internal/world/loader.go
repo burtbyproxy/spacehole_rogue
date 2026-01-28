@@ -107,6 +107,8 @@ func charToTile(ch rune) Tile {
 	// --- cargo ---
 	case 'c':
 		return Tile{Kind: TileFloor, Equipment: EquipCargoTile}
+	case 'x':
+		return Tile{Kind: TileFloor, Equipment: EquipCargoTransporter}
 	default:
 		return Tile{Kind: TileVoid}
 	}

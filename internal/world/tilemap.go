@@ -37,6 +37,7 @@ const (
 	EquipPilotConsole                  // pilot station
 	EquipScienceConsole                // science station
 	EquipCargoConsole                  // cargo management terminal
+	EquipCargoTransporter              // beams cargo to/from surface
 	EquipIncinerator                   // waste disposal (future)
 	EquipMedical                       // medical station (future)
 	EquipFoodStation                   // food replicator (clean organic → body)
@@ -63,8 +64,9 @@ const (
 
 // Tile represents a single map tile.
 type Tile struct {
-	Kind      TileKind
-	Equipment EquipmentKind
+	Kind        TileKind
+	Equipment   EquipmentKind
+	EquipmentOn bool // whether this equipment is powered on
 }
 
 // TileGrid is a 2D grid of tiles.
@@ -109,6 +111,63 @@ func (g *TileGrid) IsWalkable(x, y int) bool {
 	}
 }
 
+// SetEquipmentOn sets the on/off state for equipment at (x, y).
+func (g *TileGrid) SetEquipmentOn(x, y int, on bool) {
+	if x >= 0 && x < g.Width && y >= 0 && y < g.Height {
+		idx := y*g.Width + x
+		g.Tiles[idx].EquipmentOn = on
+	}
+}
+
+// ToggleEquipment toggles the on/off state at (x, y) and returns the new state.
+func (g *TileGrid) ToggleEquipment(x, y int) bool {
+	if x >= 0 && x < g.Width && y >= 0 && y < g.Height {
+		idx := y*g.Width + x
+		g.Tiles[idx].EquipmentOn = !g.Tiles[idx].EquipmentOn
+		return g.Tiles[idx].EquipmentOn
+	}
+	return false
+}
+
+// IsEquipmentOn returns true if the equipment at (x, y) is on.
+func (g *TileGrid) IsEquipmentOn(x, y int) bool {
+	return g.Get(x, y).EquipmentOn
+}
+
+// AnyEquipmentOn returns true if ANY equipment of the given kind is on.
+func (g *TileGrid) AnyEquipmentOn(kind EquipmentKind) bool {
+	for _, t := range g.Tiles {
+		if t.Equipment == kind && t.EquipmentOn {
+			return true
+		}
+	}
+	return false
+}
+
+// SetAllEquipmentOn sets on/off state for ALL equipment of a given kind.
+func (g *TileGrid) SetAllEquipmentOn(kind EquipmentKind, on bool) {
+	for i := range g.Tiles {
+		if g.Tiles[i].Equipment == kind {
+			g.Tiles[i].EquipmentOn = on
+		}
+	}
+}
+
+// SetAllEquipmentState sets on/off for all toggleable equipment.
+func (g *TileGrid) SetAllEquipmentState(on bool) {
+	toggleable := map[EquipmentKind]bool{
+		EquipEngine:          true,
+		EquipGenerator:       true,
+		EquipMatterRecycler:  true,
+		EquipCargoTransporter: true,
+	}
+	for i := range g.Tiles {
+		if toggleable[g.Tiles[i].Equipment] {
+			g.Tiles[i].EquipmentOn = on
+		}
+	}
+}
+
 // Describe returns a human-readable description of a tile.
 func (t Tile) Describe() string {
 	if t.Equipment != EquipNone {
@@ -135,8 +194,9 @@ var equipDescriptions = map[EquipmentKind]string{
 	EquipNavConsole:     "Nav Station - navigation and jump control",
 	EquipPilotConsole:   "Pilot Station - manual flight controls",
 	EquipScienceConsole: "Science Station - sensor analysis",
-	EquipCargoConsole:   "Cargo Console - manage and jettison cargo",
-	EquipIncinerator:    "Incinerator - waste disposal",
+	EquipCargoConsole:     "Cargo Console - manage and jettison cargo",
+	EquipCargoTransporter: "Cargo Transporter - beams cargo to/from surface",
+	EquipIncinerator:      "Incinerator - waste disposal",
 	EquipMedical:        "Medical Station - treat injuries",
 	EquipFoodStation:    "Food Replicator - dispenses meals from clean organics",
 	EquipDrinkStation:   "Drink Replicator - dispenses clean water",

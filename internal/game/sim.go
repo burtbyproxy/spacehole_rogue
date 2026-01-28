@@ -34,10 +34,7 @@ type Sim struct {
 	Ticks     uint64
 	Sector    *Sector
 
-	// Equipment on/off state
-	EngineOn    bool
-	GeneratorOn bool
-	RecyclerOn  bool
+	// Equipment state is tracked per-tile in Ship.Grid.EquipmentOn
 
 	// Skills and discovery
 	Skills    PlayerSkills
@@ -97,7 +94,7 @@ func NewSim(layout *world.ShipLayout) *Sim {
 	disc.StarTypesSeen[int(sector.Systems[0].Type)] = true
 	disc.TotalStarTypesSeen = 1
 
-	return &Sim{
+	s := &Sim{
 		ECS:            w,
 		Grid:           grid,
 		Layout:         layout,
@@ -106,13 +103,13 @@ func NewSim(layout *world.ShipLayout) *Sim {
 		Log:            log,
 		Sector:         sector,
 		Discovery:      disc,
-		EngineOn:       true,
-		GeneratorOn:    true,
-		RecyclerOn:     true,
 		OrbitPlanetIdx: -1,
 		player:         player,
 		posMap:         posMap,
 	}
+	// Turn on all toggleable equipment by default
+	s.Grid.SetAllEquipmentState(true)
+	return s
 }
 
 // NewSimWithPrologue creates a simulation starting with the prologue scenario.
@@ -145,6 +142,8 @@ func NewSimWithPrologue(layout *world.ShipLayout, seed int64) *Sim {
 	// Don't mark any system as visited yet - we're stranded before reaching one
 	disc.TotalSystemsVisited = 0
 
+	// Equipment defaults to off (EquipmentOn = false in tiles)
+	// Shuttle is broken - nothing works until prologue complete
 	return &Sim{
 		ECS:             w,
 		Grid:            grid,
@@ -154,9 +153,6 @@ func NewSimWithPrologue(layout *world.ShipLayout, seed int64) *Sim {
 		Log:             log,
 		Sector:          sector,
 		Discovery:       disc,
-		EngineOn:        false, // shuttle is broken
-		GeneratorOn:     false,
-		RecyclerOn:      false,
 		OrbitPlanetIdx:  -1,
 		Prologue:        prologue,
 		PrologueSurface: prologueSurface,
@@ -206,16 +202,10 @@ func (s *Sim) PrologueInteract() {
 		}
 
 	case world.EquipLootCrate:
-		// Same as regular surface loot
-		s.PrologueSurface.LootCollected++
-		cargoKind := CargoKind(CargoScrapMetal + CargoKind(s.PrologueSurface.LootCollected%5))
-		added := s.Resources.AddCargo(cargoKind, 1)
-		if added > 0 {
-			s.Log.Add(fmt.Sprintf("Found %s in the crate!", CargoName(cargoKind)), MsgDiscovery)
-		} else {
-			s.Log.Add("Crate searched. Cargo full.", MsgWarning)
-		}
-		surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: world.TileFloor})
+		// During prologue, shuttle may not have power - can't beam, too heavy to carry
+		s.Log.Add("Found salvage, but it's too heavy to carry.", MsgWarning)
+		s.Log.Add("Get the shuttle running first.", MsgInfo)
+		// Don't remove crate - player can come back later... or not, it's prologue
 
 	default:
 		s.Log.Add("Nothing to interact with here.", MsgSocial)
@@ -240,10 +230,8 @@ func (s *Sim) CompletePrologue() {
 	s.Log.Add("Shuttle systems online. Time to get off this rock.", MsgInfo)
 	s.Log.Add("The Monkey Lion is out there somewhere...", MsgInfo)
 
-	// Enable shuttle systems
-	s.EngineOn = true
-	s.GeneratorOn = true
-	s.RecyclerOn = true
+	// Enable all shuttle systems
+	s.Grid.SetAllEquipmentState(true)
 
 	// Give starting fuel (just enough for one jump)
 	s.Resources.Energy = s.Resources.MaxEnergy / 2
@@ -294,7 +282,7 @@ func (s *Sim) Tick() {
 }
 
 func (s *Sim) tickGenerator() {
-	if !s.GeneratorOn {
+	if !s.Grid.AnyEquipmentOn(world.EquipGenerator) {
 		return
 	}
 	if s.Ticks%generatorInterval == 0 {
@@ -305,7 +293,7 @@ func (s *Sim) tickGenerator() {
 }
 
 func (s *Sim) tickRecycler() {
-	if !s.RecyclerOn {
+	if !s.Grid.AnyEquipmentOn(world.EquipMatterRecycler) {
 		return
 	}
 	r := &s.Resources
@@ -581,7 +569,7 @@ func (s *Sim) Interact() {
 			}
 		} else {
 			status := "OFF"
-			if s.EngineOn {
+			if s.Grid.IsEquipmentOn(px, py) {
 				status = "ON"
 			}
 			s.Log.Add(fmt.Sprintf("Engine [%s]. Provides thrust.", status), MsgInfo)
@@ -590,11 +578,18 @@ func (s *Sim) Interact() {
 
 	case world.EquipGenerator:
 		status := "OFF"
-		if s.GeneratorOn {
+		if s.Grid.IsEquipmentOn(px, py) {
 			status = "ON"
 		}
 		s.Log.Add(fmt.Sprintf("Generator [%s]. Produces 1 energy/sec.", status), MsgInfo)
 		s.Skills.AddXP(SkillEngineering, 0.5)
+
+	case world.EquipCargoTransporter:
+		status := "OFF"
+		if s.Grid.IsEquipmentOn(px, py) {
+			status = "ON"
+		}
+		s.Log.Add(fmt.Sprintf("Cargo Transporter [%s]. Beams cargo from surface.", status), MsgInfo)
 
 	case world.EquipPowerCell:
 		// During prologue, can install power pack here
@@ -621,7 +616,7 @@ func (s *Sim) Interact() {
 
 	case world.EquipMatterRecycler:
 		status := "OFF"
-		if s.RecyclerOn {
+		if s.Grid.IsEquipmentOn(px, py) {
 			status = "ON"
 		}
 		rc := &r.Recycler
@@ -657,8 +652,8 @@ func (s *Sim) ToggleEquipment() {
 
 	switch tile.Equipment {
 	case world.EquipEngine:
-		s.EngineOn = !s.EngineOn
-		if s.EngineOn {
+		nowOn := s.Grid.ToggleEquipment(px, py)
+		if nowOn {
 			s.Log.Add("Engine started.", MsgInfo)
 		} else {
 			s.Log.Add("Engine shut down.", MsgWarning)
@@ -668,8 +663,8 @@ func (s *Sim) ToggleEquipment() {
 		}
 
 	case world.EquipGenerator:
-		s.GeneratorOn = !s.GeneratorOn
-		if s.GeneratorOn {
+		nowOn := s.Grid.ToggleEquipment(px, py)
+		if nowOn {
 			s.Log.Add("Generator online. Producing energy.", MsgInfo)
 		} else {
 			s.Log.Add("Generator offline. No power generation.", MsgWarning)
@@ -679,14 +674,22 @@ func (s *Sim) ToggleEquipment() {
 		}
 
 	case world.EquipMatterRecycler:
-		s.RecyclerOn = !s.RecyclerOn
-		if s.RecyclerOn {
+		nowOn := s.Grid.ToggleEquipment(px, py)
+		if nowOn {
 			s.Log.Add("Recycler online. Processing dirty matter.", MsgInfo)
 		} else {
 			s.Log.Add("Recycler offline. Saving power.", MsgInfo)
 		}
 		if s.Skills.AddXP(SkillEngineering, 3.0) {
 			LogLevelUp(s.Log, SkillEngineering, s.Skills.Level(SkillEngineering))
+		}
+
+	case world.EquipCargoTransporter:
+		nowOn := s.Grid.ToggleEquipment(px, py)
+		if nowOn {
+			s.Log.Add("Cargo transporter online. Ready to beam.", MsgInfo)
+		} else {
+			s.Log.Add("Cargo transporter offline.", MsgInfo)
 		}
 
 	default:
@@ -1142,13 +1145,19 @@ func (s *Sim) SurfaceInteract() {
 		}
 
 	case world.EquipLootCrate:
-		// Search crate for loot
+		// Check if cargo transporter is on
+		if !s.Grid.AnyEquipmentOn(world.EquipCargoTransporter) {
+			s.Log.Add("Found salvage, but cargo transporter is offline.", MsgWarning)
+			s.Log.Add("Turn it on from the cargo bay.", MsgInfo)
+			return
+		}
+		// Search crate for loot - cargo transporter beams it to shuttle
 		surf.LootCollected++
 		// Random cargo
 		cargoKind := CargoKind(CargoScrapMetal + CargoKind(surf.LootCollected%5))
 		added := s.Resources.AddCargo(cargoKind, 1)
 		if added > 0 {
-			s.Log.Add(fmt.Sprintf("Found %s in the crate!", CargoName(cargoKind)), MsgDiscovery)
+			s.Log.Add(fmt.Sprintf("Found %s! Cargo transporter locked on.", CargoName(cargoKind)), MsgDiscovery)
 		} else {
 			s.Log.Add("Crate searched. Cargo bay full.", MsgWarning)
 		}

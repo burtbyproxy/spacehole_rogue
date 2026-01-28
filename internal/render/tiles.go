@@ -49,6 +49,8 @@ func equipVisuals(eq world.EquipmentKind) (glyph byte, fg, bg uint8) {
 		return '=', ColorLightMagenta, ColorBlack // science station
 	case world.EquipCargoConsole:
 		return '=', ColorBrown, ColorBlack // cargo console
+	case world.EquipCargoTransporter:
+		return 'X', ColorLightCyan, ColorBlack // cargo transporter pad
 	// --- replicators: all $ with color variant ---
 	case world.EquipFoodStation:
 		return '$', ColorLightGreen, ColorBlack // food replicator (green)

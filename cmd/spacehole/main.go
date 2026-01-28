@@ -228,11 +228,13 @@ func (g *Game) drawShipView() {
 	row++ // gap
 	buf.WriteString(panelX, row, "--- Equipment ---", render.ColorLightCyan, render.ColorBlack)
 	row++
-	drawEquipStatus(buf, panelX, row, "Engine", g.sim.EngineOn)
+	drawEquipStatus(buf, panelX, row, "Engine", g.sim.Grid.AnyEquipmentOn(world.EquipEngine))
 	row++
-	drawEquipStatus(buf, panelX, row, "Generator", g.sim.GeneratorOn)
+	drawEquipStatus(buf, panelX, row, "Generator", g.sim.Grid.AnyEquipmentOn(world.EquipGenerator))
 	row++
-	drawEquipStatus(buf, panelX, row, "Recycler", g.sim.RecyclerOn)
+	drawEquipStatus(buf, panelX, row, "Recycler", g.sim.Grid.AnyEquipmentOn(world.EquipMatterRecycler))
+	row++
+	drawEquipStatus(buf, panelX, row, "Transporter", g.sim.Grid.AnyEquipmentOn(world.EquipCargoTransporter))
 	row++
 
 	// Player needs (right panel, below equipment)
