@@ -161,6 +161,7 @@ const (
 )
 
 // GetObjectives returns the list of things the player needs to find.
+// Power packs appear twice because generator needs 10 power (2x5 packs).
 func (p *PrologueScenario) GetObjectives() []PrologueObjectiveKind {
 	switch p.ShuttleState {
 	case ShuttleNeedsFuel:
@@ -168,13 +169,13 @@ func (p *PrologueScenario) GetObjectives() []PrologueObjectiveKind {
 	case ShuttleNeedsRepair:
 		return []PrologueObjectiveKind{PrologueObjParts}
 	case ShuttleNeedsPower:
-		return []PrologueObjectiveKind{PrologueObjPower}
+		return []PrologueObjectiveKind{PrologueObjPower, PrologueObjPower} // 2 packs needed
 	case ShuttleNeedsPowerRepair:
-		return []PrologueObjectiveKind{PrologueObjParts, PrologueObjPower}
+		return []PrologueObjectiveKind{PrologueObjParts, PrologueObjPower, PrologueObjPower} // 2 packs needed
 	case ShuttleNeedsAll:
-		return []PrologueObjectiveKind{PrologueObjFuel, PrologueObjParts, PrologueObjPower}
+		return []PrologueObjectiveKind{PrologueObjFuel, PrologueObjParts, PrologueObjPower, PrologueObjPower}
 	default:
-		return []PrologueObjectiveKind{PrologueObjParts, PrologueObjPower}
+		return []PrologueObjectiveKind{PrologueObjParts, PrologueObjPower, PrologueObjPower}
 	}
 }
 

@@ -290,34 +290,60 @@ func (s *Sim) Tick() {
 	}
 }
 
-// Power drain interval (every 2 seconds at 60 TPS)
-const powerDrainInterval = 120
+// Power check interval (every 1 second at 60 TPS)
+const powerCheckInterval = 60
 
-// tickPower has each constant-draw equipment try to pull power individually.
-// If a piece can't draw enough, it shuts off.
+// tickPower checks if there's enough power for all constant-draw equipment.
+// Constant-draw equipment RESERVES power - it doesn't drain it.
+// If total reserved > available, equipment shuts off (last-on first-off).
 func (s *Sim) tickPower() {
-	if s.Ticks%powerDrainInterval != 0 {
+	if s.Ticks%powerCheckInterval != 0 {
 		return
 	}
 
-	// Each ON equipment with constant draw tries to pull power
+	// Calculate total power reserved by ON constant-draw equipment
+	reserved := s.PowerReserved()
+
+	// If we don't have enough power, shut off equipment until we do
+	if reserved > s.Resources.Energy {
+		for i := range s.Grid.Tiles {
+			tile := &s.Grid.Tiles[i]
+			eq := tile.Equipment
+			if eq == nil || !eq.On {
+				continue
+			}
+			if eq.PowerMode != world.PowerConstant || eq.PowerCost == 0 {
+				continue
+			}
+			// Shut off this equipment
+			eq.On = false
+			s.Log.Add(fmt.Sprintf("%s shut down - insufficient power.", eq.Name()), MsgWarning)
+			reserved -= eq.PowerCost
+			if reserved <= s.Resources.Energy {
+				break // enough power now
+			}
+		}
+	}
+}
+
+// PowerReserved returns total power reserved by constant-draw equipment.
+func (s *Sim) PowerReserved() int {
+	reserved := 0
 	for i := range s.Grid.Tiles {
-		tile := &s.Grid.Tiles[i]
-		eq := tile.Equipment
+		eq := s.Grid.Tiles[i].Equipment
 		if eq == nil || !eq.On {
 			continue
 		}
-		if eq.PowerMode != world.PowerConstant || eq.PowerCost == 0 {
-			continue
-		}
-
-		// Try to draw power
-		if !eq.TryDrawPower(&s.Resources.Energy) {
-			// Not enough power - shut this equipment off
-			eq.On = false
-			s.Log.Add(fmt.Sprintf("%s shut down - no power.", eq.Name()), MsgWarning)
+		if eq.PowerMode == world.PowerConstant {
+			reserved += eq.PowerCost
 		}
 	}
+	return reserved
+}
+
+// PowerAvailable returns power available for on-use actions.
+func (s *Sim) PowerAvailable() int {
+	return s.Resources.Energy - s.PowerReserved()
 }
 
 func (s *Sim) tickGenerator() {
@@ -657,10 +683,15 @@ func (s *Sim) Interact() {
 		// Try to fill with a pack from inventory
 		if filled, packName := s.Resources.TryFillTank(world.EquipPowerCell); filled > 0 {
 			s.Log.Add(fmt.Sprintf("Used %s. +%d energy.", packName, filled), MsgDiscovery)
-			// Prologue objective tracking
+			// Prologue: power objective complete when we have enough to run generator (10)
 			if s.InPrologue() && !s.PrologueSurface.PowerFound {
-				s.PrologueSurface.MarkObjectiveFound(PrologueObjPower)
-				s.checkPrologueReady()
+				if r.Energy >= 10 {
+					s.PrologueSurface.MarkObjectiveFound(PrologueObjPower)
+					s.Log.Add("Generator can now run! Turn it on to start charging.", MsgDiscovery)
+					s.checkPrologueReady()
+				} else {
+					s.Log.Add(fmt.Sprintf("Need %d more power for generator.", 10-r.Energy), MsgInfo)
+				}
 			}
 		}
 		s.Log.Add(fmt.Sprintf("Power cell: %d/%d.", r.Energy, r.MaxEnergy), MsgInfo)

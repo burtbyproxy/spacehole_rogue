@@ -48,11 +48,11 @@ var EquipmentTemplates = map[EquipmentKind]EquipmentTemplate{
 	EquipFuelTank:    {EquipFuelTank, PowerNone, 0, 1.0},
 	EquipPowerCell:   {EquipPowerCell, PowerNone, 0, 1.0},
 
-	// --- Constant draw (per tick while ON) ---
-	EquipEngine:          {EquipEngine, PowerConstant, 2, 1.0},
-	EquipGenerator:       {EquipGenerator, PowerConstant, 1, 1.0},
-	EquipMatterRecycler:  {EquipMatterRecycler, PowerConstant, 1, 1.0},
-	EquipCargoTransporter: {EquipCargoTransporter, PowerConstant, 1, 1.0},
+	// --- Constant draw (reserves power while ON) ---
+	EquipEngine:           {EquipEngine, PowerConstant, 5, 1.0},
+	EquipGenerator:        {EquipGenerator, PowerConstant, 10, 1.0}, // needs 10 to run, produces 1/sec
+	EquipMatterRecycler:   {EquipMatterRecycler, PowerConstant, 3, 1.0},
+	EquipCargoTransporter: {EquipCargoTransporter, PowerConstant, 3, 1.0},
 
 	// --- On-use (per interaction) ---
 	EquipViewscreen:     {EquipViewscreen, PowerOnUse, 1, 1.0},
