@@ -110,6 +110,10 @@ func GenerateSurfaceMap(seed int64, planetIdx int, planetKind PlanetKind, poi st
 		}
 	}
 
+	// Initialize fog of war
+	sm.InitVisibility()
+	sm.UpdateVisibility()
+
 	return sm
 }
 

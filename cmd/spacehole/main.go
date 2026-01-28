@@ -2009,20 +2009,27 @@ func (g *Game) drawSurfaceView() {
 	camX := surf.PlayerX - mapVpW/2
 	camY := surf.PlayerY - mapVpH/2
 
-	// Render terrain grid clipped to map viewport
-	render.RenderSurfaceGridClipped(buf, surf.Grid, surf.TerrainType, mapVpX, mapVpY, mapVpW, mapVpH, camX, camY)
+	// Render terrain grid clipped to map viewport with fog of war
+	render.RenderSurfaceGridWithFog(buf, surf.Grid, surf.TerrainType, mapVpX, mapVpY, mapVpW, mapVpH, camX, camY,
+		surf.IsVisible, surf.IsSeen)
 
 	// Draw player at viewport center
 	buf.Set(mapCenterX, mapCenterY, '@', render.ColorWhite, render.ColorBlack)
 
-	// Draw shuttle marker if visible within map viewport
+	// Draw shuttle marker if visible within map viewport and not in fog
 	shuttleScreenX := mapVpX + (surf.ShuttleX - camX)
 	shuttleScreenY := mapVpY + (surf.ShuttleY - camY)
 	if shuttleScreenX >= mapVpX && shuttleScreenX < mapVpX+mapVpW &&
-		shuttleScreenY >= mapVpY && shuttleScreenY < mapVpY+mapVpH {
+		shuttleScreenY >= mapVpY && shuttleScreenY < mapVpY+mapVpH &&
+		surf.IsSeen(surf.ShuttleX, surf.ShuttleY) {
 		// Don't overwrite if player is standing on it
 		if surf.PlayerX != surf.ShuttleX || surf.PlayerY != surf.ShuttleY {
-			buf.Set(shuttleScreenX, shuttleScreenY, 'H', render.ColorWhite, render.ColorGreen)
+			if surf.IsVisible(surf.ShuttleX, surf.ShuttleY) {
+				buf.Set(shuttleScreenX, shuttleScreenY, 'H', render.ColorWhite, render.ColorGreen)
+			} else {
+				// Dimmed when remembered but not visible
+				buf.Set(shuttleScreenX, shuttleScreenY, 'H', render.ColorDarkGray, render.ColorBlack)
+			}
 		}
 	}
 

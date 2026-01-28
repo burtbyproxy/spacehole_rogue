@@ -111,6 +111,10 @@ func GeneratePrologueMap(scenario *PrologueScenario, seed int64) *PrologueSurfac
 		Complete:    false,
 	}
 
+	// Initialize fog of war
+	sm.InitVisibility()
+	sm.UpdateVisibility()
+
 	return ps
 }
 

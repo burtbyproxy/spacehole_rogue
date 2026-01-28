@@ -137,6 +137,17 @@ func RenderSurfaceGrid(buf *CellBuffer, grid *world.TileGrid, terrain world.Terr
 // camX, camY is the world position of the top-left of the viewport.
 func RenderSurfaceGridClipped(buf *CellBuffer, grid *world.TileGrid, terrain world.TerrainType,
 	vpX, vpY, vpW, vpH int, camX, camY int) {
+	// Call the fog-aware version with no fog (everything visible)
+	RenderSurfaceGridWithFog(buf, grid, terrain, vpX, vpY, vpW, vpH, camX, camY, nil, nil)
+}
+
+// RenderSurfaceGridWithFog renders a surface grid with fog of war support.
+// isVisible and isSeen are callbacks that check visibility at world coordinates.
+// If both are nil, everything is rendered normally (no fog).
+func RenderSurfaceGridWithFog(buf *CellBuffer, grid *world.TileGrid, terrain world.TerrainType,
+	vpX, vpY, vpW, vpH int, camX, camY int,
+	isVisible func(x, y int) bool, isSeen func(x, y int) bool) {
+
 	for sy := 0; sy < vpH; sy++ {
 		for sx := 0; sx < vpW; sx++ {
 			// World coordinates
@@ -154,6 +165,25 @@ func RenderSurfaceGridClipped(buf *CellBuffer, grid *world.TileGrid, terrain wor
 				continue
 			}
 
+			// Check visibility (if fog callbacks provided)
+			if isVisible != nil && isSeen != nil {
+				if !isSeen(wx, wy) {
+					// Never seen - show terrain background only
+					bg := terrainBG(terrain)
+					buf.Set(screenX, screenY, ' ', bg, bg)
+					continue
+				}
+				if !isVisible(wx, wy) {
+					// Seen but not currently visible - show dimmed
+					tile := grid.Get(wx, wy)
+					glyph, _, bg := surfaceTileVisuals(tile, terrain)
+					// Use dark gray for remembered tiles
+					buf.Set(screenX, screenY, glyph, ColorDarkGray, bg)
+					continue
+				}
+			}
+
+			// Visible or no fog - render normally
 			tile := grid.Get(wx, wy)
 			glyph, fg, bg := surfaceTileVisuals(tile, terrain)
 			buf.Set(screenX, screenY, glyph, fg, bg)
