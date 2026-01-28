@@ -132,6 +132,35 @@ func RenderSurfaceGrid(buf *CellBuffer, grid *world.TileGrid, terrain world.Terr
 	}
 }
 
+// RenderSurfaceGridClipped renders a surface grid clipped to a viewport.
+// Only tiles within (vpX, vpY) to (vpX+vpW-1, vpY+vpH-1) are drawn.
+// camX, camY is the world position of the top-left of the viewport.
+func RenderSurfaceGridClipped(buf *CellBuffer, grid *world.TileGrid, terrain world.TerrainType,
+	vpX, vpY, vpW, vpH int, camX, camY int) {
+	for sy := 0; sy < vpH; sy++ {
+		for sx := 0; sx < vpW; sx++ {
+			// World coordinates
+			wx := camX + sx
+			wy := camY + sy
+			// Screen coordinates
+			screenX := vpX + sx
+			screenY := vpY + sy
+
+			// Check world bounds
+			if wx < 0 || wx >= grid.Width || wy < 0 || wy >= grid.Height {
+				// Outside map - fill with terrain background
+				bg := terrainBG(terrain)
+				buf.Set(screenX, screenY, ' ', bg, bg)
+				continue
+			}
+
+			tile := grid.Get(wx, wy)
+			glyph, fg, bg := surfaceTileVisuals(tile, terrain)
+			buf.Set(screenX, screenY, glyph, fg, bg)
+		}
+	}
+}
+
 // surfaceTileVisuals returns glyph/colors for terrain-aware tiles.
 func surfaceTileVisuals(t world.Tile, terrain world.TerrainType) (glyph byte, fg, bg uint8) {
 	// Equipment takes priority - but use terrain background

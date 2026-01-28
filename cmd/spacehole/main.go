@@ -181,9 +181,9 @@ func (g *Game) drawShipView() {
 	buf.Clear()
 
 	// --- HUD backgrounds (dark gray to distinguish from map) ---
-	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorDarkGray)    // right panel
-	buf.FillRect(0, hudRow, panelX, gridRows-hudRow, render.ColorDarkGray)      // bottom HUD
-	buf.FillRect(0, 0, gridCols, 1, render.ColorDarkGray)                       // title bar
+	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorHUDBG)       // right panel
+	buf.FillRect(0, hudRow, panelX, gridRows-hudRow, render.ColorHUDBG)         // bottom HUD
+	buf.FillRect(0, 0, gridCols, 1, render.ColorHUDBG)                          // title bar
 
 	// --- World layer (camera-relative) ---
 	ox := g.cameraX()
@@ -306,9 +306,9 @@ func (g *Game) drawSectorMapView() {
 	buf.Clear()
 
 	// --- HUD backgrounds (dark gray to distinguish from map) ---
-	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorDarkGray)    // right panel
-	buf.FillRect(0, commsRow, panelX, gridRows-commsRow, render.ColorDarkGray)  // comms area
-	buf.FillRect(0, 0, gridCols, 1, render.ColorDarkGray)                       // title bar
+	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorHUDBG)       // right panel
+	buf.FillRect(0, commsRow, panelX, gridRows-commsRow, render.ColorHUDBG)     // comms area
+	buf.FillRect(0, 0, gridCols, 1, render.ColorHUDBG)                          // title bar
 
 	sec := g.sim.Sector
 	cur := sec.Systems[sec.CurrentSystem]
@@ -409,9 +409,9 @@ func (g *Game) drawSystemMapView() {
 	buf.Clear()
 
 	// --- HUD backgrounds (dark gray to distinguish from map) ---
-	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorDarkGray)    // right panel
-	buf.FillRect(0, commsRow, panelX, gridRows-commsRow, render.ColorDarkGray)  // comms area
-	buf.FillRect(0, 0, gridCols, 2, render.ColorDarkGray)                       // title bar + gap
+	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorHUDBG)       // right panel
+	buf.FillRect(0, commsRow, panelX, gridRows-commsRow, render.ColorHUDBG)     // comms area
+	buf.FillRect(0, 0, gridCols, 2, render.ColorHUDBG)                          // title bar + gap
 
 	sm := g.sim.Sector.CurrentSystemMap()
 	curStar := g.sim.Sector.Systems[g.sim.Sector.CurrentSystem]
@@ -1261,7 +1261,7 @@ func (g *Game) drawStationView() {
 	buf.Clear()
 
 	// --- HUD backgrounds ---
-	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorDarkGray) // comms area
+	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorHUDBG) // comms area
 
 	switch g.stationMenu {
 	case stMenuRepairs:
@@ -1615,7 +1615,7 @@ func (g *Game) drawCargoView() {
 	buf.Clear()
 
 	// --- HUD backgrounds ---
-	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorDarkGray) // comms area
+	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorHUDBG) // comms area
 
 	cx := 4
 	r := &g.sim.Resources
@@ -1707,7 +1707,7 @@ func (g *Game) drawEncounterView() {
 	buf.Clear()
 
 	// --- HUD backgrounds ---
-	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorDarkGray) // comms area
+	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorHUDBG) // comms area
 
 	enc := g.sim.ActiveEncounter
 	if enc == nil {
@@ -1846,7 +1846,7 @@ func (g *Game) drawEpisodeView() {
 	buf.Clear()
 
 	// --- HUD backgrounds ---
-	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorDarkGray) // comms area
+	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorHUDBG) // comms area
 
 	ep := g.sim.ActiveEpisode
 	if ep == nil {
@@ -1990,24 +1990,36 @@ func (g *Game) drawSurfaceView() {
 		return
 	}
 
-	// Fill HUD areas with dark gray background to distinguish from map
-	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorDarkGray)    // right panel
-	buf.FillRect(0, commsRow, panelX, gridRows-commsRow, render.ColorDarkGray)  // comms area
+	// Map viewport bounds (left of right panel, above comms)
+	const (
+		mapVpX = 0
+		mapVpY = 0
+		mapVpW = panelX        // 60 columns
+		mapVpH = commsRow      // 33 rows
+	)
+	// Player centered in map viewport
+	mapCenterX := mapVpX + mapVpW/2 // 30
+	mapCenterY := mapVpY + mapVpH/2 // 16
 
-	// Camera centers on player (same pattern as ship view)
-	ox := viewCenterX - surf.PlayerX
-	oy := viewCenterY - surf.PlayerY
+	// Fill HUD areas with very subtle dark background
+	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorHUDBG)       // right panel
+	buf.FillRect(0, commsRow, panelX, gridRows-commsRow, render.ColorHUDBG)     // comms area
 
-	// Render terrain grid
-	render.RenderSurfaceGrid(buf, surf.Grid, surf.TerrainType, ox, oy)
+	// Camera position: world coords of top-left of viewport
+	camX := surf.PlayerX - mapVpW/2
+	camY := surf.PlayerY - mapVpH/2
 
-	// Draw player
-	buf.Set(viewCenterX, viewCenterY, '@', render.ColorWhite, render.ColorBlack)
+	// Render terrain grid clipped to map viewport
+	render.RenderSurfaceGridClipped(buf, surf.Grid, surf.TerrainType, mapVpX, mapVpY, mapVpW, mapVpH, camX, camY)
 
-	// Draw shuttle marker if visible (bright white on green to stand out)
-	shuttleScreenX := surf.ShuttleX + ox
-	shuttleScreenY := surf.ShuttleY + oy
-	if shuttleScreenX >= 0 && shuttleScreenX < gridCols && shuttleScreenY >= 0 && shuttleScreenY < gridRows {
+	// Draw player at viewport center
+	buf.Set(mapCenterX, mapCenterY, '@', render.ColorWhite, render.ColorBlack)
+
+	// Draw shuttle marker if visible within map viewport
+	shuttleScreenX := mapVpX + (surf.ShuttleX - camX)
+	shuttleScreenY := mapVpY + (surf.ShuttleY - camY)
+	if shuttleScreenX >= mapVpX && shuttleScreenX < mapVpX+mapVpW &&
+		shuttleScreenY >= mapVpY && shuttleScreenY < mapVpY+mapVpH {
 		// Don't overwrite if player is standing on it
 		if surf.PlayerX != surf.ShuttleX || surf.PlayerY != surf.ShuttleY {
 			buf.Set(shuttleScreenX, shuttleScreenY, 'H', render.ColorWhite, render.ColorGreen)
@@ -2253,8 +2265,8 @@ func (g *Game) drawCharSheetView() {
 	buf := g.buffer
 	buf.Clear()
 
-	// Full screen UI - dark gray background (not a map)
-	buf.FillRect(0, 0, gridCols, gridRows, render.ColorDarkGray)
+	// Full screen UI - subtle background (not a map)
+	buf.FillRect(0, 0, gridCols, gridRows, render.ColorHUDBG)
 
 	cx := 2
 	skills := &g.sim.Skills

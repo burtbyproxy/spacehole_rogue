@@ -20,10 +20,12 @@ const (
 	ColorLightMagenta = 13
 	ColorYellow       = 14
 	ColorWhite        = 15
+	// Extended palette (beyond CGA)
+	ColorHUDBG = 16 // Very subtle dark gray for HUD backgrounds
 )
 
-// Palette contains the classic CGA 16-color palette.
-var Palette = [16]color.RGBA{
+// Palette contains the classic CGA 16-color palette plus extensions.
+var Palette = [17]color.RGBA{
 	{0, 0, 0, 255},       // 0: Black
 	{0, 0, 170, 255},     // 1: Blue
 	{0, 170, 0, 255},     // 2: Green
@@ -40,4 +42,5 @@ var Palette = [16]color.RGBA{
 	{255, 85, 255, 255},  // 13: Light Magenta
 	{255, 255, 85, 255},  // 14: Yellow
 	{255, 255, 255, 255}, // 15: White
+	{20, 20, 20, 255},    // 16: HUD BG (very subtle dark gray)
 }

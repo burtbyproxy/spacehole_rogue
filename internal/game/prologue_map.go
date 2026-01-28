@@ -87,6 +87,9 @@ func GeneratePrologueMap(scenario *PrologueScenario, seed int64) *PrologueSurfac
 		sm.PlayerY = shuttleY - 1
 	}
 
+	// Ensure all structure doors are reachable from player spawn
+	ensureDoorsReachable(sm.Grid, sm.PlayerX, sm.PlayerY)
+
 	// Place objectives based on what's needed
 	objectives := scenario.GetObjectives()
 	ps := &PrologueSurface{
@@ -97,6 +100,9 @@ func GeneratePrologueMap(scenario *PrologueScenario, seed int64) *PrologueSurfac
 
 	// Place objective items around the map (only in reachable positions)
 	placeObjectiveItems(sm.Grid, objectives, shuttleX, shuttleY, sm.PlayerX, sm.PlayerY, rng)
+
+	// Place loot crates in reachable positions
+	placeLootCrates(sm.Grid, sm.PlayerX, sm.PlayerY, rng)
 
 	// Create a multi-objective description
 	sm.Objective = &SurfaceObjective{
@@ -223,18 +229,10 @@ func placeRoom(grid *world.TileGrid, x, y, w, h, corridorY int, rng *rand.Rand) 
 		}
 		grid.Set(doorX, y, world.Tile{Kind: world.TileDoor})
 	}
-
-	// Maybe add some equipment
-	if rng.Float64() < 0.4 {
-		eqX := x + 1 + rng.IntN(w-2)
-		eqY := y + 1 + rng.IntN(h-2)
-		if grid.Get(eqX, eqY).Kind == world.TileFloor {
-			grid.Set(eqX, eqY, world.TileWithEquipment(world.TileFloor, world.EquipLootCrate))
-		}
-	}
+	// Loot crates are placed separately via placeLootCrates() after reachability check
 }
 
-// placeSmallRuin places a small ruin structure.
+// placeSmallRuin places a small ruin structure and clears an approach path to its door.
 func placeSmallRuin(grid *world.TileGrid, x, y int, rng *rand.Rand) {
 	templates := [][]string{
 		{
@@ -259,6 +257,7 @@ func placeSmallRuin(grid *world.TileGrid, x, y int, rng *rand.Rand) {
 	}
 
 	template := templates[rng.IntN(len(templates))]
+	var doorX, doorY int
 	for dy, row := range template {
 		for dx, ch := range row {
 			px, py := x+dx, y+dy
@@ -269,6 +268,116 @@ func placeSmallRuin(grid *world.TileGrid, x, y int, rng *rand.Rand) {
 			if tile.Kind != world.TileVoid {
 				grid.Set(px, py, tile)
 			}
+			// Track door position
+			if ch == '+' {
+				doorX, doorY = px, py
+			}
+		}
+	}
+
+	// Clear an approach path from the door (doors face right in these templates)
+	// Clear 3-4 tiles to the right of the door to ensure access
+	for dx := 1; dx <= 4; dx++ {
+		px := doorX + dx
+		if px >= 0 && px < grid.Width && doorY >= 0 && doorY < grid.Height {
+			tile := grid.Get(px, doorY)
+			// Only clear rocks/hazards, don't overwrite other structures
+			if tile.Kind == world.TileRock || tile.Kind == world.TileHazard {
+				grid.Set(px, doorY, world.Tile{Kind: world.TileGround})
+			}
+		}
+	}
+}
+
+// ensureDoorsReachable finds all doors and carves paths to any that aren't reachable.
+func ensureDoorsReachable(grid *world.TileGrid, playerX, playerY int) {
+	// Find all reachable positions
+	reachable := floodFillReachable(grid, playerX, playerY)
+
+	// Find all door positions
+	var doors [][2]int
+	for y := 0; y < grid.Height; y++ {
+		for x := 0; x < grid.Width; x++ {
+			if grid.Get(x, y).Kind == world.TileDoor {
+				doors = append(doors, [2]int{x, y})
+			}
+		}
+	}
+
+	// For each unreachable door, carve a path to it
+	for _, door := range doors {
+		dx, dy := door[0], door[1]
+		if reachable[door] {
+			continue // Already reachable
+		}
+
+		// Find nearest reachable tile using BFS
+		nearest := findNearestReachable(grid, dx, dy, reachable)
+		if nearest[0] == -1 {
+			continue // No reachable tile found (shouldn't happen)
+		}
+
+		// Carve a straight-ish path from nearest reachable to the door
+		carvePath(grid, nearest[0], nearest[1], dx, dy)
+
+		// Update reachability after carving
+		reachable = floodFillReachable(grid, playerX, playerY)
+	}
+}
+
+// findNearestReachable finds the nearest reachable tile to (startX, startY).
+func findNearestReachable(grid *world.TileGrid, startX, startY int, reachable map[[2]int]bool) [2]int {
+	visited := make(map[[2]int]bool)
+	queue := [][2]int{{startX, startY}}
+
+	for len(queue) > 0 {
+		pos := queue[0]
+		queue = queue[1:]
+
+		if visited[pos] {
+			continue
+		}
+		visited[pos] = true
+
+		x, y := pos[0], pos[1]
+		if x < 0 || x >= grid.Width || y < 0 || y >= grid.Height {
+			continue
+		}
+
+		// Found a reachable tile
+		if reachable[pos] {
+			return pos
+		}
+
+		// Expand search (including through walls/rocks for search purposes)
+		queue = append(queue, [2]int{x - 1, y})
+		queue = append(queue, [2]int{x + 1, y})
+		queue = append(queue, [2]int{x, y - 1})
+		queue = append(queue, [2]int{x, y + 1})
+	}
+
+	return [2]int{-1, -1} // Not found
+}
+
+// carvePath clears a path from (x1,y1) to (x2,y2) by clearing rocks/hazards.
+func carvePath(grid *world.TileGrid, x1, y1, x2, y2 int) {
+	x, y := x1, y1
+	for x != x2 || y != y2 {
+		// Clear this tile if it's blocking
+		tile := grid.Get(x, y)
+		if tile.Kind == world.TileRock || tile.Kind == world.TileHazard {
+			grid.Set(x, y, world.Tile{Kind: world.TileGround})
+		}
+
+		// Move toward target (simple approach: horizontal then vertical)
+		if x < x2 {
+			x++
+		} else if x > x2 {
+			x--
+		} else if y < y2 {
+			y++
+		} else if y > y2 {
+			y--
 		}
 	}
 }
@@ -362,6 +471,40 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// placeLootCrates places loot crates in reachable floor positions.
+func placeLootCrates(grid *world.TileGrid, playerX, playerY int, rng *rand.Rand) {
+	// Find all reachable positions from player spawn
+	reachable := floodFillReachable(grid, playerX, playerY)
+
+	// Find valid floor positions for loot crates
+	var positions [][2]int
+	for y := 1; y < grid.Height-1; y++ {
+		for x := 1; x < grid.Width-1; x++ {
+			// Must be reachable
+			if !reachable[[2]int{x, y}] {
+				continue
+			}
+			// Must be floor tile without equipment
+			tile := grid.Get(x, y)
+			if tile.Kind == world.TileFloor && tile.Equipment == nil {
+				positions = append(positions, [2]int{x, y})
+			}
+		}
+	}
+
+	// Shuffle positions
+	rng.Shuffle(len(positions), func(i, j int) {
+		positions[i], positions[j] = positions[j], positions[i]
+	})
+
+	// Place 2-4 loot crates
+	numCrates := 2 + rng.IntN(3)
+	for i := 0; i < numCrates && i < len(positions); i++ {
+		pos := positions[i]
+		grid.Set(pos[0], pos[1], world.TileWithEquipment(world.TileFloor, world.EquipLootCrate))
+	}
 }
 
 // CheckPrologueComplete checks if all objectives are found.
