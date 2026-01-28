@@ -89,7 +89,7 @@ func GenerateSurfaceMap(seed int64, planetIdx int, planetKind PlanetKind, poi st
 		// No terminal, find a floor tile and place objective marker
 		objX, objY = findFloorInStructure(sm.Grid, structX, structY, structure)
 		if objX >= 0 {
-			sm.Grid.Set(objX, objY, world.Tile{Kind: world.TileFloor, Equipment: world.EquipObjective})
+			sm.Grid.Set(objX, objY, world.TileWithEquipment(world.TileFloor, world.EquipObjective))
 		}
 	}
 
@@ -97,7 +97,7 @@ func GenerateSurfaceMap(seed int64, planetIdx int, planetKind PlanetKind, poi st
 	if objX >= 0 {
 		objKind := ObjReachTerminal
 		desc := "Access the terminal"
-		if sm.Grid.Get(objX, objY).Equipment == world.EquipObjective {
+		if sm.Grid.EquipmentKindAt(objX, objY) == world.EquipObjective {
 			objKind = ObjFindItem
 			desc = "Retrieve the artifact"
 		}
@@ -219,9 +219,9 @@ func charToTile(ch rune) world.Tile {
 	case '+':
 		return world.Tile{Kind: world.TileDoor}
 	case 'T':
-		return world.Tile{Kind: world.TileFloor, Equipment: world.EquipTerminal}
+		return world.TileWithEquipment(world.TileFloor, world.EquipTerminal)
 	case 'L':
-		return world.Tile{Kind: world.TileFloor, Equipment: world.EquipLootCrate}
+		return world.TileWithEquipment(world.TileFloor, world.EquipLootCrate)
 	default:
 		return world.Tile{Kind: world.TileVoid} // unchanged
 	}
@@ -232,7 +232,7 @@ func findEquipmentInStructure(grid *world.TileGrid, startX, startY int, template
 		for dx := range row {
 			x := startX + dx
 			y := startY + dy
-			if grid.Get(x, y).Equipment == equip {
+			if grid.EquipmentKindAt(x, y) == equip {
 				return x, y
 			}
 		}
@@ -246,7 +246,7 @@ func findFloorInStructure(grid *world.TileGrid, startX, startY int, template []s
 			if ch == '.' {
 				x := startX + dx
 				y := startY + dy
-				if grid.Get(x, y).Kind == world.TileFloor && grid.Get(x, y).Equipment == world.EquipNone {
+				if grid.Get(x, y).Kind == world.TileFloor && grid.Get(x, y).Equipment == nil {
 					return x, y
 				}
 			}

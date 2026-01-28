@@ -50,23 +50,42 @@ func GeneratePrologueMap(scenario *PrologueScenario, seed int64) *PrologueSurfac
 	}
 
 	// Fill based on location type
-	if scenario.IsInterior() {
+	isInterior := scenario.IsInterior()
+	if isInterior {
 		fillInteriorMap(sm.Grid, rng)
 	} else {
 		fillPlanetMap(sm.Grid, terrain, rng)
 	}
 
-	// Place the broken shuttle (center-ish of map)
-	shuttleX := PrologueMapWidth/2 + rng.IntN(5) - 2
-	shuttleY := PrologueMapHeight - 5
-	clearArea(sm.Grid, shuttleX-2, shuttleY-1, 5, 3)
-	sm.Grid.Set(shuttleX, shuttleY, world.Tile{Kind: world.TileShuttlePad})
-	sm.ShuttleX = shuttleX
-	sm.ShuttleY = shuttleY
-
-	// Player spawns near shuttle
-	sm.PlayerX = shuttleX
-	sm.PlayerY = shuttleY - 1
+	// Place the broken shuttle
+	var shuttleX, shuttleY int
+	if isInterior {
+		// For interior maps, place shuttle at end of main corridor
+		corridorY := PrologueMapHeight / 2
+		shuttleX = PrologueMapWidth/2 + rng.IntN(5) - 2
+		shuttleY = corridorY
+		// Clear a small docking area
+		for dx := -1; dx <= 1; dx++ {
+			sm.Grid.Set(shuttleX+dx, shuttleY, world.Tile{Kind: world.TileFloor})
+		}
+		sm.Grid.Set(shuttleX, shuttleY, world.Tile{Kind: world.TileShuttlePad})
+		sm.ShuttleX = shuttleX
+		sm.ShuttleY = shuttleY
+		// Player spawns adjacent on corridor
+		sm.PlayerX = shuttleX + 2
+		sm.PlayerY = shuttleY
+	} else {
+		// Outdoor: shuttle near bottom center
+		shuttleX = PrologueMapWidth/2 + rng.IntN(5) - 2
+		shuttleY = PrologueMapHeight - 5
+		clearArea(sm.Grid, shuttleX-2, shuttleY-1, 5, 3)
+		sm.Grid.Set(shuttleX, shuttleY, world.Tile{Kind: world.TileShuttlePad})
+		sm.ShuttleX = shuttleX
+		sm.ShuttleY = shuttleY
+		// Player spawns near shuttle
+		sm.PlayerX = shuttleX
+		sm.PlayerY = shuttleY - 1
+	}
 
 	// Place objectives based on what's needed
 	objectives := scenario.GetObjectives()
@@ -210,7 +229,7 @@ func placeRoom(grid *world.TileGrid, x, y, w, h, corridorY int, rng *rand.Rand) 
 		eqX := x + 1 + rng.IntN(w-2)
 		eqY := y + 1 + rng.IntN(h-2)
 		if grid.Get(eqX, eqY).Kind == world.TileFloor {
-			grid.Set(eqX, eqY, world.Tile{Kind: world.TileFloor, Equipment: world.EquipLootCrate})
+			grid.Set(eqX, eqY, world.TileWithEquipment(world.TileFloor, world.EquipLootCrate))
 		}
 	}
 }
@@ -265,7 +284,7 @@ func placeObjectiveItems(grid *world.TileGrid, objectives []PrologueObjectiveKin
 				continue
 			}
 			if grid.Get(x, y).Kind == world.TileFloor || grid.Get(x, y).Kind == world.TileGround {
-				if grid.Get(x, y).Equipment == world.EquipNone {
+				if grid.Get(x, y).Equipment == nil {
 					positions = append(positions, [2]int{x, y})
 				}
 			}
@@ -292,10 +311,7 @@ func placeObjectiveItems(grid *world.TileGrid, objectives []PrologueObjectiveKin
 		case PrologueObjPower:
 			equip = world.EquipPowerPack
 		}
-		grid.Set(pos[0], pos[1], world.Tile{
-			Kind:      grid.Get(pos[0], pos[1]).Kind,
-			Equipment: equip,
-		})
+		grid.Set(pos[0], pos[1], world.TileWithEquipment(grid.Get(pos[0], pos[1]).Kind, equip))
 	}
 }
 

@@ -64,52 +64,60 @@ func charToTile(ch rune) Tile {
 		return Tile{Kind: TileDoor}
 	// --- crew quarters ---
 	case 'b':
-		return Tile{Kind: TileFloor, Equipment: EquipBed}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipBed)}
 	case 'L':
-		return Tile{Kind: TileFloor, Equipment: EquipLocker}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipLocker)}
 	// --- bridge stations ---
 	case 'V':
-		return Tile{Kind: TileFloor, Equipment: EquipViewscreen}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipViewscreen)}
 	case 'N':
-		return Tile{Kind: TileFloor, Equipment: EquipNavConsole}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipNavConsole)}
 	case 'P':
-		return Tile{Kind: TileFloor, Equipment: EquipPilotConsole}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipPilotConsole)}
 	case 'S':
-		return Tile{Kind: TileFloor, Equipment: EquipScienceConsole}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipScienceConsole)}
 	// --- main deck ---
 	case 'C':
-		return Tile{Kind: TileFloor, Equipment: EquipCargoConsole}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipCargoConsole)}
 	case 'I':
-		return Tile{Kind: TileFloor, Equipment: EquipIncinerator}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipIncinerator)}
 	case 'M':
-		return Tile{Kind: TileFloor, Equipment: EquipMedical}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipMedical)}
 	case 'F':
-		return Tile{Kind: TileFloor, Equipment: EquipFoodStation}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipFoodStation)}
 	case 'D':
-		return Tile{Kind: TileFloor, Equipment: EquipDrinkStation}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipDrinkStation)}
 	case 't':
-		return Tile{Kind: TileFloor, Equipment: EquipToilet}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipToilet)}
 	case 's':
-		return Tile{Kind: TileFloor, Equipment: EquipShower}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipShower)}
 	// --- engineering ---
 	case 'G':
-		return Tile{Kind: TileFloor, Equipment: EquipOrganicTank}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipOrganicTank)}
 	case 'r':
-		return Tile{Kind: TileFloor, Equipment: EquipMatterRecycler}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipMatterRecycler)}
 	case 'W':
-		return Tile{Kind: TileFloor, Equipment: EquipWaterTank}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipWaterTank)}
 	case 'E':
-		return Tile{Kind: TileFloor, Equipment: EquipEngine}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipEngine)}
 	case 'p':
-		return Tile{Kind: TileFloor, Equipment: EquipPowerCell}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipPowerCell)}
 	case 'g':
-		return Tile{Kind: TileFloor, Equipment: EquipGenerator}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipGenerator)}
 	// --- cargo ---
 	case 'c':
-		return Tile{Kind: TileFloor, Equipment: EquipCargoTile}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipCargoTile)}
 	case 'x':
-		return Tile{Kind: TileFloor, Equipment: EquipCargoTransporter}
+		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipCargoTransporter)}
 	default:
 		return Tile{Kind: TileVoid}
 	}
+}
+
+// TileWithEquipment creates a tile with the given kind and equipment instance.
+func TileWithEquipment(kind TileKind, equipKind EquipmentKind) Tile {
+	if equipKind == EquipNone {
+		return Tile{Kind: kind}
+	}
+	return Tile{Kind: kind, Equipment: NewEquipment(equipKind)}
 }

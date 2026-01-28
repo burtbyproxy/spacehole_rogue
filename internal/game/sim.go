@@ -144,7 +144,7 @@ func NewSimWithPrologue(layout *world.ShipLayout, seed int64) *Sim {
 
 	// Equipment defaults to off (EquipmentOn = false in tiles)
 	// Shuttle is broken - nothing works until prologue complete
-	return &Sim{
+	s := &Sim{
 		ECS:             w,
 		Grid:            grid,
 		Layout:          layout,
@@ -160,6 +160,9 @@ func NewSimWithPrologue(layout *world.ShipLayout, seed int64) *Sim {
 		player:          player,
 		posMap:          posMap,
 	}
+	// Shuttle is dead - no power
+	s.Resources.Energy = 0
+	return s
 }
 
 // InPrologue returns true if the player is still in the starting prologue.
@@ -176,7 +179,12 @@ func (s *Sim) PrologueInteract() {
 	surf := s.PrologueSurface.SurfaceMap
 	tile := surf.GetTile(surf.PlayerX, surf.PlayerY)
 
-	switch tile.Equipment {
+	if tile.Equipment == nil {
+		s.Log.Add("Nothing to interact with here.", MsgSocial)
+		return
+	}
+
+	switch tile.Equipment.Kind {
 	case world.EquipFuelCell:
 		if s.Resources.Inventory.AddItem(ItemFuelCells, 1) {
 			s.Log.Add("Grabbed fuel cells. Use at fuel tank on shuttle.", MsgDiscovery)
@@ -269,6 +277,7 @@ func (s *Sim) TryMovePlayer(dx, dy int) bool {
 // Tick advances the simulation by one step.
 func (s *Sim) Tick() {
 	s.Ticks++
+	s.tickPower()
 	s.tickGenerator()
 	s.tickRecycler()
 	s.tickBody()
@@ -281,8 +290,42 @@ func (s *Sim) Tick() {
 	}
 }
 
+// Power drain interval (every 2 seconds at 60 TPS)
+const powerDrainInterval = 120
+
+// tickPower has each constant-draw equipment try to pull power individually.
+// If a piece can't draw enough, it shuts off.
+func (s *Sim) tickPower() {
+	if s.Ticks%powerDrainInterval != 0 {
+		return
+	}
+
+	// Each ON equipment with constant draw tries to pull power
+	for i := range s.Grid.Tiles {
+		tile := &s.Grid.Tiles[i]
+		eq := tile.Equipment
+		if eq == nil || !eq.On {
+			continue
+		}
+		if eq.PowerMode != world.PowerConstant || eq.PowerCost == 0 {
+			continue
+		}
+
+		// Try to draw power
+		if !eq.TryDrawPower(&s.Resources.Energy) {
+			// Not enough power - shut this equipment off
+			eq.On = false
+			s.Log.Add(fmt.Sprintf("%s shut down - no power.", eq.Name()), MsgWarning)
+		}
+	}
+}
+
 func (s *Sim) tickGenerator() {
 	if !s.Grid.AnyEquipmentOn(world.EquipGenerator) {
+		return
+	}
+	// Generator needs at least 1 energy to run (bootstrap problem)
+	if s.Resources.Energy < 1 {
 		return
 	}
 	if s.Ticks%generatorInterval == 0 {
@@ -427,7 +470,20 @@ func (s *Sim) Interact() {
 	tile := s.Grid.Get(px, py)
 	r := &s.Resources
 
-	switch tile.Equipment {
+	// Get equipment (may be nil)
+	eq := tile.Equipment
+	if eq == nil {
+		s.Log.Add("Nothing to interact with here.", MsgSocial)
+		return
+	}
+
+	// Check on-use power cost before processing
+	if !eq.CanUse(r.Energy) {
+		s.Log.Add(fmt.Sprintf("Not enough power. Need %d energy.", eq.PowerCost), MsgWarning)
+		return
+	}
+
+	switch eq.Kind {
 	case world.EquipFoodStation:
 		// Eat: clean organic leaves ship → enters body, hunger drops
 		if r.Organic.Clean < 5 {
@@ -438,6 +494,8 @@ func (s *Sim) Interact() {
 			s.Log.Add("Too full to eat. Use the toilet first.", MsgWarning)
 			return
 		}
+		// Deduct on-use power
+		eq.Use(&r.Energy)
 		r.Organic.Clean -= 5
 		r.BodyOrganic += 5
 		s.Needs.Hunger = max(s.Needs.Hunger-35, 0)
@@ -456,6 +514,7 @@ func (s *Sim) Interact() {
 			s.Log.Add("Too full to drink. Use the toilet first.", MsgWarning)
 			return
 		}
+		eq.Use(&r.Energy)
 		r.Water.Clean -= 3
 		r.BodyWater += 3
 		s.Needs.Thirst = max(s.Needs.Thirst-25, 0)
@@ -471,6 +530,7 @@ func (s *Sim) Interact() {
 			s.Log.Add("Nothing to deposit. Efficient.", MsgSocial)
 			return
 		}
+		eq.Use(&r.Energy)
 		s.Log.Add(fmt.Sprintf("Waste flushed. +%d dirty organic, +%d dirty water back in system.",
 			r.WasteOrganic, r.WasteWater), MsgInfo)
 		r.Organic.Dirty += r.WasteOrganic
@@ -487,6 +547,7 @@ func (s *Sim) Interact() {
 			s.Log.Add("Not enough clean water for a shower.", MsgWarning)
 			return
 		}
+		eq.Use(&r.Energy)
 		r.Water.Clean -= 3
 		r.Water.Dirty += 3
 		s.Needs.Hygiene = max(s.Needs.Hygiene-40, 0)
@@ -502,10 +563,12 @@ func (s *Sim) Interact() {
 		s.Log.Add("Storage locker. Empty for now.", MsgSocial)
 
 	case world.EquipNavConsole:
+		eq.Use(&r.Energy)
 		s.NavActivated = true
 		s.Log.Add("Navigation console activated.", MsgInfo)
 
 	case world.EquipPilotConsole:
+		eq.Use(&r.Energy)
 		if s.IsOrbiting() {
 			// Check if planet has a scanned POI for landing
 			scanKey := ScanKey(s.Sector.CurrentSystem, s.OrbitPlanetIdx)
@@ -524,6 +587,7 @@ func (s *Sim) Interact() {
 		}
 
 	case world.EquipScienceConsole:
+		eq.Use(&r.Energy)
 		s.ScanActivated = true
 		if s.IsOrbiting() {
 			sm := s.Sector.CurrentSystemMap()
@@ -535,6 +599,7 @@ func (s *Sim) Interact() {
 
 	case world.EquipIncinerator:
 		// Incinerator shows fuel status, actual conversion happens via cargo console
+		eq.Use(&r.Energy)
 		s.Log.Add(fmt.Sprintf("Fuel tank: %d/%d", s.Resources.JumpFuel, s.Resources.MaxJumpFuel), MsgInfo)
 		s.Log.Add("Use cargo console to incinerate cargo for fuel.", MsgInfo)
 
@@ -625,6 +690,7 @@ func (s *Sim) Interact() {
 		s.Skills.AddXP(SkillEngineering, 0.5)
 
 	case world.EquipViewscreen:
+		eq.Use(&r.Energy)
 		if s.PendingHail != nil {
 			s.CommsActivated = true
 			s.Log.Add(fmt.Sprintf("Answering hail from %s.", s.PendingHail.Ship.Name), MsgInfo)
@@ -634,6 +700,7 @@ func (s *Sim) Interact() {
 		}
 
 	case world.EquipCargoConsole:
+		eq.Use(&r.Energy)
 		s.CargoActivated = true
 		s.Log.Add("Cargo console activated.", MsgInfo)
 
@@ -648,12 +715,23 @@ func (s *Sim) Interact() {
 // ToggleEquipment handles the player pressing T on equipment to toggle it on/off.
 func (s *Sim) ToggleEquipment() {
 	px, py := s.PlayerPos()
-	tile := s.Grid.Get(px, py)
+	eq := s.Grid.GetEquipment(px, py)
 
-	switch tile.Equipment {
+	if eq == nil {
+		s.Log.Add("Nothing to toggle here.", MsgSocial)
+		return
+	}
+
+	// Check if trying to turn ON equipment without power
+	if !eq.On && s.Resources.Energy < 1 {
+		s.Log.Add("No power. Can't turn on equipment.", MsgWarning)
+		return
+	}
+
+	switch eq.Kind {
 	case world.EquipEngine:
-		nowOn := s.Grid.ToggleEquipment(px, py)
-		if nowOn {
+		eq.On = !eq.On
+		if eq.On {
 			s.Log.Add("Engine started.", MsgInfo)
 		} else {
 			s.Log.Add("Engine shut down.", MsgWarning)
@@ -663,8 +741,8 @@ func (s *Sim) ToggleEquipment() {
 		}
 
 	case world.EquipGenerator:
-		nowOn := s.Grid.ToggleEquipment(px, py)
-		if nowOn {
+		eq.On = !eq.On
+		if eq.On {
 			s.Log.Add("Generator online. Producing energy.", MsgInfo)
 		} else {
 			s.Log.Add("Generator offline. No power generation.", MsgWarning)
@@ -674,8 +752,8 @@ func (s *Sim) ToggleEquipment() {
 		}
 
 	case world.EquipMatterRecycler:
-		nowOn := s.Grid.ToggleEquipment(px, py)
-		if nowOn {
+		eq.On = !eq.On
+		if eq.On {
 			s.Log.Add("Recycler online. Processing dirty matter.", MsgInfo)
 		} else {
 			s.Log.Add("Recycler offline. Saving power.", MsgInfo)
@@ -685,8 +763,8 @@ func (s *Sim) ToggleEquipment() {
 		}
 
 	case world.EquipCargoTransporter:
-		nowOn := s.Grid.ToggleEquipment(px, py)
-		if nowOn {
+		eq.On = !eq.On
+		if eq.On {
 			s.Log.Add("Cargo transporter online. Ready to beam.", MsgInfo)
 		} else {
 			s.Log.Add("Cargo transporter offline.", MsgInfo)
@@ -1132,7 +1210,12 @@ func (s *Sim) SurfaceInteract() {
 	surf := s.ActiveSurface
 	tile := surf.GetTile(surf.PlayerX, surf.PlayerY)
 
-	switch tile.Equipment {
+	if tile.Equipment == nil {
+		s.Log.Add("Nothing to interact with here.", MsgSocial)
+		return
+	}
+
+	switch tile.Equipment.Kind {
 	case world.EquipTerminal:
 		s.Log.Add("Accessing terminal... Data retrieved.", MsgInfo)
 		if surf.Objective != nil && surf.Objective.Kind == ObjReachTerminal &&

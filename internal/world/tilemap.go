@@ -64,9 +64,8 @@ const (
 
 // Tile represents a single map tile.
 type Tile struct {
-	Kind        TileKind
-	Equipment   EquipmentKind
-	EquipmentOn bool // whether this equipment is powered on
+	Kind      TileKind
+	Equipment *Equipment // nil if no equipment, otherwise an instance
 }
 
 // TileGrid is a 2D grid of tiles.
@@ -115,7 +114,9 @@ func (g *TileGrid) IsWalkable(x, y int) bool {
 func (g *TileGrid) SetEquipmentOn(x, y int, on bool) {
 	if x >= 0 && x < g.Width && y >= 0 && y < g.Height {
 		idx := y*g.Width + x
-		g.Tiles[idx].EquipmentOn = on
+		if g.Tiles[idx].Equipment != nil {
+			g.Tiles[idx].Equipment.On = on
+		}
 	}
 }
 
@@ -123,21 +124,29 @@ func (g *TileGrid) SetEquipmentOn(x, y int, on bool) {
 func (g *TileGrid) ToggleEquipment(x, y int) bool {
 	if x >= 0 && x < g.Width && y >= 0 && y < g.Height {
 		idx := y*g.Width + x
-		g.Tiles[idx].EquipmentOn = !g.Tiles[idx].EquipmentOn
-		return g.Tiles[idx].EquipmentOn
+		if eq := g.Tiles[idx].Equipment; eq != nil {
+			eq.On = !eq.On
+			return eq.On
+		}
 	}
 	return false
 }
 
 // IsEquipmentOn returns true if the equipment at (x, y) is on.
 func (g *TileGrid) IsEquipmentOn(x, y int) bool {
-	return g.Get(x, y).EquipmentOn
+	t := g.Get(x, y)
+	return t.Equipment != nil && t.Equipment.On
+}
+
+// GetEquipment returns the equipment at (x, y), or nil if none.
+func (g *TileGrid) GetEquipment(x, y int) *Equipment {
+	return g.Get(x, y).Equipment
 }
 
 // AnyEquipmentOn returns true if ANY equipment of the given kind is on.
 func (g *TileGrid) AnyEquipmentOn(kind EquipmentKind) bool {
 	for _, t := range g.Tiles {
-		if t.Equipment == kind && t.EquipmentOn {
+		if t.Equipment != nil && t.Equipment.Kind == kind && t.Equipment.On {
 			return true
 		}
 	}
@@ -147,8 +156,8 @@ func (g *TileGrid) AnyEquipmentOn(kind EquipmentKind) bool {
 // SetAllEquipmentOn sets on/off state for ALL equipment of a given kind.
 func (g *TileGrid) SetAllEquipmentOn(kind EquipmentKind, on bool) {
 	for i := range g.Tiles {
-		if g.Tiles[i].Equipment == kind {
-			g.Tiles[i].EquipmentOn = on
+		if eq := g.Tiles[i].Equipment; eq != nil && eq.Kind == kind {
+			eq.On = on
 		}
 	}
 }
@@ -162,16 +171,25 @@ func (g *TileGrid) SetAllEquipmentState(on bool) {
 		EquipCargoTransporter: true,
 	}
 	for i := range g.Tiles {
-		if toggleable[g.Tiles[i].Equipment] {
-			g.Tiles[i].EquipmentOn = on
+		if eq := g.Tiles[i].Equipment; eq != nil && toggleable[eq.Kind] {
+			eq.On = on
 		}
 	}
 }
 
+// EquipmentKindAt returns the equipment kind at (x, y), or EquipNone if none.
+func (g *TileGrid) EquipmentKindAt(x, y int) EquipmentKind {
+	t := g.Get(x, y)
+	if t.Equipment != nil {
+		return t.Equipment.Kind
+	}
+	return EquipNone
+}
+
 // Describe returns a human-readable description of a tile.
 func (t Tile) Describe() string {
-	if t.Equipment != EquipNone {
-		return equipDescriptions[t.Equipment]
+	if t.Equipment != nil {
+		return equipDescriptions[t.Equipment.Kind]
 	}
 	return tileDescriptions[t.Kind]
 }

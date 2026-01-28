@@ -14,8 +14,8 @@ func RenderTileGrid(buf *CellBuffer, grid *world.TileGrid, offsetX, offsetY int)
 }
 
 func tileVisuals(t world.Tile) (glyph byte, fg, bg uint8) {
-	if t.Equipment != world.EquipNone {
-		return equipVisuals(t.Equipment)
+	if t.Equipment != nil {
+		return equipVisuals(t.Equipment.Kind, t.Equipment.On)
 	}
 
 	switch t.Kind {
@@ -30,7 +30,7 @@ func tileVisuals(t world.Tile) (glyph byte, fg, bg uint8) {
 	}
 }
 
-func equipVisuals(eq world.EquipmentKind) (glyph byte, fg, bg uint8) {
+func equipVisuals(eq world.EquipmentKind, on bool) (glyph byte, fg, bg uint8) {
 	switch eq {
 	// --- crew quarters ---
 	case world.EquipBed:
@@ -50,7 +50,11 @@ func equipVisuals(eq world.EquipmentKind) (glyph byte, fg, bg uint8) {
 	case world.EquipCargoConsole:
 		return '=', ColorBrown, ColorBlack // cargo console
 	case world.EquipCargoTransporter:
-		return 'X', ColorLightCyan, ColorBlack // cargo transporter pad
+		// Toggleable - show darker when OFF
+		if on {
+			return 'X', ColorLightCyan, ColorBlack
+		}
+		return 'X', ColorDarkGray, ColorBlack
 	// --- replicators: all $ with color variant ---
 	case world.EquipFoodStation:
 		return '$', ColorLightGreen, ColorBlack // food replicator (green)
@@ -77,12 +81,24 @@ func equipVisuals(eq world.EquipmentKind) (glyph byte, fg, bg uint8) {
 		return 254, ColorLightMagenta, ColorBlack // ■ fuel tank (purple = jump juice)
 	// --- processors: all ▒ with color variant ---
 	case world.EquipMatterRecycler:
-		return 177, ColorLightMagenta, ColorBlack // ▒ recycler (magenta)
+		// Toggleable - show darker when OFF
+		if on {
+			return 177, ColorLightMagenta, ColorBlack
+		}
+		return 177, ColorDarkGray, ColorBlack
 	case world.EquipGenerator:
-		return 177, ColorBrown, ColorBlack // ▒ generator (gold)
+		// Toggleable - show darker when OFF
+		if on {
+			return 177, ColorBrown, ColorBlack
+		}
+		return 177, ColorDarkGray, ColorBlack
 	// --- propulsion ---
 	case world.EquipEngine:
-		return '%', ColorBrown, ColorBlack // engine (gold)
+		// Toggleable - show darker when OFF
+		if on {
+			return '%', ColorBrown, ColorBlack
+		}
+		return '%', ColorDarkGray, ColorBlack
 	// --- cargo ---
 	case world.EquipCargoTile:
 		return 176, ColorDarkGray, ColorBlack // ░ cargo pad
@@ -119,8 +135,8 @@ func RenderSurfaceGrid(buf *CellBuffer, grid *world.TileGrid, terrain world.Terr
 // surfaceTileVisuals returns glyph/colors for terrain-aware tiles.
 func surfaceTileVisuals(t world.Tile, terrain world.TerrainType) (glyph byte, fg, bg uint8) {
 	// Equipment takes priority (same as ship)
-	if t.Equipment != world.EquipNone {
-		return equipVisuals(t.Equipment)
+	if t.Equipment != nil {
+		return equipVisuals(t.Equipment.Kind, t.Equipment.On)
 	}
 
 	// Terrain-specific tile appearance
