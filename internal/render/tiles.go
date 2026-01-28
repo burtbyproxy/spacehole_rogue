@@ -134,9 +134,10 @@ func RenderSurfaceGrid(buf *CellBuffer, grid *world.TileGrid, terrain world.Terr
 
 // surfaceTileVisuals returns glyph/colors for terrain-aware tiles.
 func surfaceTileVisuals(t world.Tile, terrain world.TerrainType) (glyph byte, fg, bg uint8) {
-	// Equipment takes priority (same as ship)
+	// Equipment takes priority - but use terrain background
 	if t.Equipment != nil {
-		return equipVisuals(t.Equipment.Kind, t.Equipment.On)
+		glyph, fg, _ = equipVisuals(t.Equipment.Kind, t.Equipment.On)
+		return glyph, fg, terrainBG(terrain)
 	}
 
 	// Terrain-specific tile appearance
@@ -150,27 +151,48 @@ func surfaceTileVisuals(t world.Tile, terrain world.TerrainType) (glyph byte, fg
 	case world.TileShuttlePad:
 		return terrainShuttlePad(terrain)
 	case world.TileWall:
-		// Structures use standard wall visuals
-		return '#', ColorLightGray, ColorDarkGray
+		// Man-made structures: clearly artificial
+		return terrainWall(terrain)
 	case world.TileFloor:
-		// Structures use standard floor visuals
-		return '.', ColorDarkGray, ColorBlack
+		// Interior floor in structures
+		return terrainFloor(terrain)
 	case world.TileDoor:
-		return '+', ColorBrown, ColorBlack
+		return terrainDoor(terrain)
 	default:
-		return ' ', ColorBlack, ColorBlack
+		bg := terrainBG(terrain)
+		return ' ', bg, bg
+	}
+}
+
+// terrainBG returns the base background color for a terrain type.
+func terrainBG(terrain world.TerrainType) uint8 {
+	switch terrain {
+	case world.TerrainRocky:
+		return ColorBrown // earthy desert brown
+	case world.TerrainIce:
+		return ColorBlue // deep frozen blue
+	case world.TerrainVolcanic:
+		return ColorRed // volcanic red
+	case world.TerrainInterior:
+		return ColorBlack // station interior
+	default:
+		return ColorBlack
 	}
 }
 
 func terrainGround(terrain world.TerrainType) (byte, uint8, uint8) {
 	switch terrain {
 	case world.TerrainRocky:
-		return '.', ColorBrown, ColorBlack
+		// Sandy desert: yellow dots on brown
+		return '.', ColorYellow, ColorBrown
 	case world.TerrainIce:
-		return '.', ColorLightCyan, ColorBlack
+		// Frozen tundra: cyan dots on deep blue
+		return '.', ColorLightCyan, ColorBlue
 	case world.TerrainVolcanic:
-		return '.', ColorRed, ColorBlack
+		// Cooled lava: brown/orange on dark red
+		return '.', ColorBrown, ColorRed
 	case world.TerrainInterior:
+		// Station floor: gray on black
 		return '.', ColorDarkGray, ColorBlack
 	default:
 		return '.', ColorDarkGray, ColorBlack
@@ -178,36 +200,81 @@ func terrainGround(terrain world.TerrainType) (byte, uint8, uint8) {
 }
 
 func terrainRock(terrain world.TerrainType) (byte, uint8, uint8) {
+	// Natural rock formations: use ▒ (177) to distinguish from man-made walls
 	switch terrain {
 	case world.TerrainRocky:
-		return '#', ColorLightGray, ColorDarkGray
+		// Granite boulders: gray on brown
+		return 177, ColorLightGray, ColorBrown
 	case world.TerrainIce:
-		return '#', ColorWhite, ColorCyan
+		// Ice formations: white on cyan
+		return 177, ColorWhite, ColorCyan
 	case world.TerrainVolcanic:
-		return '#', ColorBrown, ColorRed
+		// Volcanic rock: dark on red
+		return 177, ColorDarkGray, ColorRed
 	case world.TerrainInterior:
-		return '#', ColorLightGray, ColorDarkGray
+		// Debris: gray on black
+		return 177, ColorDarkGray, ColorBlack
 	default:
-		return '#', ColorLightGray, ColorDarkGray
+		return 177, ColorLightGray, ColorBlack
 	}
 }
 
 func terrainHazard(terrain world.TerrainType) (byte, uint8, uint8) {
 	switch terrain {
 	case world.TerrainRocky:
-		return '^', ColorRed, ColorBlack // unstable ground
+		// Unstable ground: bright warning on contrasting bg
+		return '^', ColorYellow, ColorRed
 	case world.TerrainIce:
-		return '~', ColorBlue, ColorBlack // crevasse
+		// Crevasse: dark crack in ice
+		return '~', ColorBlack, ColorCyan
 	case world.TerrainVolcanic:
-		return '~', ColorYellow, ColorRed // lava
+		// Lava pool: glowing yellow on bright red
+		return '~', ColorYellow, ColorLightRed
 	case world.TerrainInterior:
-		return '!', ColorRed, ColorBlack // breach/danger
+		// Breach/danger: red warning
+		return '!', ColorLightRed, ColorBlack
 	default:
-		return '!', ColorRed, ColorBlack
+		return '!', ColorLightRed, ColorBlack
 	}
 }
 
 func terrainShuttlePad(terrain world.TerrainType) (byte, uint8, uint8) {
-	// Shuttle pad is always bright white on green to stand out
-	return 'H', ColorWhite, ColorGreen
+	// Shuttle pad: white H on cyan - stands out on any terrain
+	return 'H', ColorWhite, ColorCyan
+}
+
+func terrainWall(terrain world.TerrainType) (byte, uint8, uint8) {
+	// Man-made structure walls: solid block, clearly artificial
+	switch terrain {
+	case world.TerrainRocky, world.TerrainVolcanic:
+		// Metal walls on hostile terrain: gray block
+		return 219, ColorLightGray, ColorDarkGray // █
+	case world.TerrainIce:
+		// Research station: white walls
+		return 219, ColorWhite, ColorDarkGray
+	case world.TerrainInterior:
+		// Standard station wall
+		return '#', ColorLightGray, ColorDarkGray
+	default:
+		return '#', ColorLightGray, ColorDarkGray
+	}
+}
+
+func terrainFloor(terrain world.TerrainType) (byte, uint8, uint8) {
+	// Interior floor in structures
+	switch terrain {
+	case world.TerrainRocky, world.TerrainVolcanic, world.TerrainIce:
+		// Shelter interior: dark floor
+		return '.', ColorDarkGray, ColorBlack
+	case world.TerrainInterior:
+		// Station floor
+		return '.', ColorDarkGray, ColorBlack
+	default:
+		return '.', ColorDarkGray, ColorBlack
+	}
+}
+
+func terrainDoor(terrain world.TerrainType) (byte, uint8, uint8) {
+	// Doors in structures
+	return '+', ColorBrown, ColorBlack
 }

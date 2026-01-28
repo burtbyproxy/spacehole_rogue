@@ -64,7 +64,7 @@ var EquipmentTemplates = map[EquipmentKind]EquipmentTemplate{
 	EquipFoodStation:    {EquipFoodStation, PowerOnUse, 2, 1.0},
 	EquipDrinkStation:   {EquipDrinkStation, PowerOnUse, 1, 1.0},
 	EquipIncinerator:    {EquipIncinerator, PowerOnUse, 2, 1.0},
-	EquipToilet:         {EquipToilet, PowerOnUse, 1, 1.0},
+	EquipToilet:         {EquipToilet, PowerNone, 0, 1.0}, // gravity-fed, no power needed
 	EquipShower:         {EquipShower, PowerOnUse, 1, 1.0},
 
 	// --- Surface equipment (no ship power) ---

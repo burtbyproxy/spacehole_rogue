@@ -63,6 +63,15 @@ func (b *CellBuffer) WriteString(x, y int, s string, fg, bg uint8) {
 	}
 }
 
+// FillRect fills a rectangular area with a background color (space glyphs).
+func (b *CellBuffer) FillRect(x, y, w, h int, bg uint8) {
+	for dy := 0; dy < h; dy++ {
+		for dx := 0; dx < w; dx++ {
+			b.Set(x+dx, y+dy, ' ', ColorWhite, bg)
+		}
+	}
+}
+
 // GridRenderer draws a CellBuffer to an Ebitengine screen.
 type GridRenderer struct {
 	Atlas   *FontAtlas
@@ -132,4 +141,65 @@ func (r *GridRenderer) DrawFloating(screen *ebiten.Image, glyph byte, fg uint8, 
 	op.GeoM.Translate(px, py)
 	op.ColorScale.ScaleWithColor(Palette[fg])
 	screen.DrawImage(g, &op)
+}
+
+// TextCharWidth is the pixel width for tight text rendering (8px for 7px font + 1px gap).
+const TextCharWidth = 8
+
+// DrawText renders a string with tight character spacing at pixel coordinates.
+// Use this for readable UI text instead of the spaced-out cell grid.
+func (r *GridRenderer) DrawText(screen *ebiten.Image, x, y int, s string, fg uint8) {
+	px := float64(x)
+	py := float64(y)
+	var op ebiten.DrawImageOptions
+
+	for _, ch := range s {
+		if ch > 255 {
+			ch = '?'
+		}
+		if ch != ' ' && ch != 0 {
+			glyph := r.Atlas.Glyph(byte(ch))
+			op = ebiten.DrawImageOptions{}
+			op.GeoM.Translate(px, py)
+			op.ColorScale.ScaleWithColor(Palette[fg])
+			screen.DrawImage(glyph, &op)
+		}
+		px += TextCharWidth
+	}
+}
+
+// DrawTextBG renders a string with tight spacing and a background color.
+func (r *GridRenderer) DrawTextBG(screen *ebiten.Image, x, y int, s string, fg, bg uint8) {
+	px := float64(x)
+	py := float64(y)
+	var op ebiten.DrawImageOptions
+
+	// Draw background strip
+	if bg != ColorBlack {
+		op = ebiten.DrawImageOptions{}
+		op.GeoM.Scale(float64(len(s)*TextCharWidth), float64(GlyphHeight))
+		op.GeoM.Translate(px, py)
+		op.ColorScale.ScaleWithColor(Palette[bg])
+		screen.DrawImage(r.bgPixel, &op)
+	}
+
+	// Draw text
+	for _, ch := range s {
+		if ch > 255 {
+			ch = '?'
+		}
+		if ch != ' ' && ch != 0 {
+			glyph := r.Atlas.Glyph(byte(ch))
+			op = ebiten.DrawImageOptions{}
+			op.GeoM.Translate(px, py)
+			op.ColorScale.ScaleWithColor(Palette[fg])
+			screen.DrawImage(glyph, &op)
+		}
+		px += TextCharWidth
+	}
+}
+
+// TextWidth returns the pixel width of a string in tight text mode.
+func TextWidth(s string) int {
+	return len(s) * TextCharWidth
 }

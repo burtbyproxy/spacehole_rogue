@@ -95,8 +95,8 @@ func GeneratePrologueMap(scenario *PrologueScenario, seed int64) *PrologueSurfac
 		ObjectivesLeft: objectives,
 	}
 
-	// Place objective items around the map
-	placeObjectiveItems(sm.Grid, objectives, shuttleX, shuttleY, rng)
+	// Place objective items around the map (only in reachable positions)
+	placeObjectiveItems(sm.Grid, objectives, shuttleX, shuttleY, sm.PlayerX, sm.PlayerY, rng)
 
 	// Create a multi-objective description
 	sm.Objective = &SurfaceObjective{
@@ -273,14 +273,56 @@ func placeSmallRuin(grid *world.TileGrid, x, y int, rng *rand.Rand) {
 	}
 }
 
+// floodFillReachable returns a set of all positions reachable from (startX, startY).
+func floodFillReachable(grid *world.TileGrid, startX, startY int) map[[2]int]bool {
+	reachable := make(map[[2]int]bool)
+	queue := [][2]int{{startX, startY}}
+
+	for len(queue) > 0 {
+		pos := queue[0]
+		queue = queue[1:]
+
+		if reachable[pos] {
+			continue
+		}
+
+		x, y := pos[0], pos[1]
+		if x < 0 || x >= grid.Width || y < 0 || y >= grid.Height {
+			continue
+		}
+
+		if !grid.IsWalkable(x, y) {
+			continue
+		}
+
+		reachable[pos] = true
+
+		// Add neighbors
+		queue = append(queue, [2]int{x - 1, y})
+		queue = append(queue, [2]int{x + 1, y})
+		queue = append(queue, [2]int{x, y - 1})
+		queue = append(queue, [2]int{x, y + 1})
+	}
+
+	return reachable
+}
+
 // placeObjectiveItems places the prologue objectives around the map.
-func placeObjectiveItems(grid *world.TileGrid, objectives []PrologueObjectiveKind, shuttleX, shuttleY int, rng *rand.Rand) {
-	// Find valid positions away from shuttle
+// Only places items in positions reachable from the player spawn.
+func placeObjectiveItems(grid *world.TileGrid, objectives []PrologueObjectiveKind, shuttleX, shuttleY, playerX, playerY int, rng *rand.Rand) {
+	// First, find all reachable positions from player spawn
+	reachable := floodFillReachable(grid, playerX, playerY)
+
+	// Find valid positions away from shuttle that are reachable
 	var positions [][2]int
 	for y := 3; y < grid.Height-5; y++ {
 		for x := 3; x < grid.Width-3; x++ {
 			// Skip near shuttle
 			if abs(x-shuttleX) < 8 && abs(y-shuttleY) < 5 {
+				continue
+			}
+			// Must be reachable
+			if !reachable[[2]int{x, y}] {
 				continue
 			}
 			if grid.Get(x, y).Kind == world.TileFloor || grid.Get(x, y).Kind == world.TileGround {

@@ -71,6 +71,13 @@ type floatingSprite struct {
 	PX, PY float64
 }
 
+// uiTextCmd is a text command for tight UI text rendering.
+type uiTextCmd struct {
+	X, Y int
+	Text string
+	FG   uint8
+}
+
 // Game is the Ebitengine game struct. It owns rendering and input.
 // All gameplay state lives in sim.
 type Game struct {
@@ -80,6 +87,7 @@ type Game struct {
 	sim      *game.Sim
 	viewMode ViewMode
 	sprites  []floatingSprite // sub-tile sprites drawn on top of CellBuffer
+	uiText   []uiTextCmd      // tight-spaced UI text drawn after buffer
 
 	// Character sheet
 	prevViewMode ViewMode // view to return to from char sheet
@@ -87,6 +95,17 @@ type Game struct {
 	// Station docking state
 	stationMenu int               // current station submenu (stMenu* constants)
 	stationData *game.StationData // current docked station (nil when not docked)
+}
+
+// Text adds a tight-spaced text command using cell coordinates.
+// The text will be rendered at proper character spacing (8px) instead of cell spacing (16px).
+func (g *Game) Text(cellX, cellY int, s string, fg uint8) {
+	g.uiText = append(g.uiText, uiTextCmd{
+		X:    cellX * cellWidth,
+		Y:    cellY * cellHeight,
+		Text: s,
+		FG:   fg,
+	})
 }
 
 func NewGame() *Game {
@@ -134,6 +153,7 @@ func (g *Game) cameraY() int {
 
 func (g *Game) drawScreen() {
 	g.sprites = g.sprites[:0] // clear floating sprites; only system map populates them
+	g.uiText = g.uiText[:0]   // clear UI text commands
 	switch g.viewMode {
 	case ViewSectorMap:
 		g.drawSectorMapView()
@@ -159,6 +179,11 @@ func (g *Game) drawScreen() {
 func (g *Game) drawShipView() {
 	buf := g.buffer
 	buf.Clear()
+
+	// --- HUD backgrounds (dark gray to distinguish from map) ---
+	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorDarkGray)    // right panel
+	buf.FillRect(0, hudRow, panelX, gridRows-hudRow, render.ColorDarkGray)      // bottom HUD
+	buf.FillRect(0, 0, gridCols, 1, render.ColorDarkGray)                       // title bar
 
 	// --- World layer (camera-relative) ---
 	ox := g.cameraX()
@@ -256,29 +281,34 @@ func (g *Game) drawShipView() {
 	row++
 	buf.WriteString(panelX+1, row, tile.Describe(), render.ColorLightGray, render.ColorBlack)
 
-	// Message log (live from sim)
+	// Message log (live from sim) - tight text for readability
 	// Blinking hail alert when pending hail exists
 	if g.sim.PendingHail != nil && (g.sim.Ticks/30)%2 == 0 {
-		buf.WriteString(2, commsRow, ">>> INCOMING HAIL <<<", render.ColorYellow, render.ColorBlack)
+		g.Text(2, commsRow, ">>> INCOMING HAIL <<<", render.ColorYellow)
 	} else {
-		buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+		g.Text(2, commsRow, "--- Comms ---", render.ColorLightCyan)
 	}
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		clr := msgColor(msg.Priority)
-		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+		g.Text(2, commsRow+1+i, msg.Text, clr)
 	}
 
 	// Instructions - change based on whether landed
 	if g.sim.IsOnSurface() {
-		buf.WriteString(2, gridRows-2, "LANDED - E at door: Exit  Pilot: Lift off", render.ColorLightGreen, render.ColorBlack)
+		g.Text(2, gridRows-2, "LANDED - E at door: Exit  Pilot: Lift off", render.ColorLightGreen)
 	}
-	buf.WriteString(2, gridRows-1, "WASD: Move  E: Interact  T: Toggle  Tab: Status  ESC: Quit", render.ColorDarkGray, render.ColorBlack)
+	g.Text(2, gridRows-1, "WASD: Move  E: Interact  T: Toggle  Tab: Status  ESC: Quit", render.ColorDarkGray)
 }
 
 func (g *Game) drawSectorMapView() {
 	buf := g.buffer
 	buf.Clear()
+
+	// --- HUD backgrounds (dark gray to distinguish from map) ---
+	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorDarkGray)    // right panel
+	buf.FillRect(0, commsRow, panelX, gridRows-commsRow, render.ColorDarkGray)  // comms area
+	buf.FillRect(0, 0, gridCols, 1, render.ColorDarkGray)                       // title bar
 
 	sec := g.sim.Sector
 	cur := sec.Systems[sec.CurrentSystem]
@@ -362,21 +392,26 @@ func (g *Game) drawSectorMapView() {
 	}
 	buf.WriteString(infoX, 15, fmt.Sprintf("Explored: %d/%d", visited, len(sec.Systems)), render.ColorDarkGray, render.ColorBlack)
 
-	// Comms log
-	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	// Comms log (tight text)
+	g.Text(2, commsRow, "--- Comms ---", render.ColorLightCyan)
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		clr := msgColor(msg.Priority)
-		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+		g.Text(2, commsRow+1+i, msg.Text, clr)
 	}
 
 	// Instructions
-	buf.WriteString(2, gridRows-1, "WASD: Select star  E: Jump  ESC: Back", render.ColorDarkGray, render.ColorBlack)
+	g.Text(2, gridRows-1, "WASD: Select star  E: Jump  ESC: Back", render.ColorDarkGray)
 }
 
 func (g *Game) drawSystemMapView() {
 	buf := g.buffer
 	buf.Clear()
+
+	// --- HUD backgrounds (dark gray to distinguish from map) ---
+	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorDarkGray)    // right panel
+	buf.FillRect(0, commsRow, panelX, gridRows-commsRow, render.ColorDarkGray)  // comms area
+	buf.FillRect(0, 0, gridCols, 2, render.ColorDarkGray)                       // title bar + gap
 
 	sm := g.sim.Sector.CurrentSystemMap()
 	curStar := g.sim.Sector.Systems[g.sim.Sector.CurrentSystem]
@@ -583,16 +618,16 @@ func (g *Game) drawSystemMapView() {
 	// --- Radar minimap ---
 	g.drawRadar(buf, sm, curStar)
 
-	// Comms log
-	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	// Comms log (tight text)
+	g.Text(2, commsRow, "--- Comms ---", render.ColorLightCyan)
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		clr := msgColor(msg.Priority)
-		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+		g.Text(2, commsRow+1+i, msg.Text, clr)
 	}
 
 	// Instructions
-	buf.WriteString(2, gridRows-1, "WASD: Fly  E: Interact/Scan  N: Nav  Tab: Status  ESC: Ship", render.ColorDarkGray, render.ColorBlack)
+	g.Text(2, gridRows-1, "WASD: Fly  E: Interact/Scan  N: Nav  Tab: Status  ESC: Ship", render.ColorDarkGray)
 }
 
 // drawRadar renders a shuttle-centered minimap of the star system.
@@ -1225,6 +1260,9 @@ func (g *Game) drawStationView() {
 	buf := g.buffer
 	buf.Clear()
 
+	// --- HUD backgrounds ---
+	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorDarkGray) // comms area
+
 	switch g.stationMenu {
 	case stMenuRepairs:
 		g.drawStationRepairs(buf)
@@ -1242,12 +1280,12 @@ func (g *Game) drawStationView() {
 		g.drawStationMain(buf)
 	}
 
-	// Comms log (always visible)
-	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	// Comms log (tight text)
+	g.Text(2, commsRow, "--- Comms ---", render.ColorLightCyan)
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		clr := msgColor(msg.Priority)
-		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+		g.Text(2, commsRow+1+i, msg.Text, clr)
 	}
 }
 
@@ -1576,6 +1614,9 @@ func (g *Game) drawCargoView() {
 	buf := g.buffer
 	buf.Clear()
 
+	// --- HUD backgrounds ---
+	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorDarkGray) // comms area
+
 	cx := 4
 	r := &g.sim.Resources
 
@@ -1617,15 +1658,15 @@ func (g *Game) drawCargoView() {
 	row++
 	buf.WriteString(cx, row, "Shift+1-9: Jettison (throw away)", render.ColorDarkGray, render.ColorBlack)
 
-	// Comms log
-	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	// Comms log (tight text)
+	g.Text(2, commsRow, "--- Comms ---", render.ColorLightCyan)
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		clr := msgColor(msg.Priority)
-		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+		g.Text(2, commsRow+1+i, msg.Text, clr)
 	}
 
-	buf.WriteString(2, gridRows-1, "1-9: Incinerate  Shift+1-9: Jettison  ESC: Back", render.ColorDarkGray, render.ColorBlack)
+	g.Text(2, gridRows-1, "1-9: Incinerate  Shift+1-9: Jettison  ESC: Back", render.ColorDarkGray)
 }
 
 func (g *Game) updateCargo() error {
@@ -1664,6 +1705,9 @@ func (g *Game) updateCargo() error {
 func (g *Game) drawEncounterView() {
 	buf := g.buffer
 	buf.Clear()
+
+	// --- HUD backgrounds ---
+	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorDarkGray) // comms area
 
 	enc := g.sim.ActiveEncounter
 	if enc == nil {
@@ -1738,18 +1782,18 @@ func (g *Game) drawEncounterView() {
 		buf.WriteString(cx, row, "-----------------------------------------", render.ColorCyan, render.ColorBlack)
 	}
 
-	// Comms log
-	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	// Comms log (tight text)
+	g.Text(2, commsRow, "--- Comms ---", render.ColorLightCyan)
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		msgClr := msgColor(msg.Priority)
-		buf.WriteString(2, commsRow+1+i, msg.Text, msgClr, render.ColorBlack)
+		g.Text(2, commsRow+1+i, msg.Text, msgClr)
 	}
 
 	if enc.Resolved {
-		buf.WriteString(2, gridRows-1, "ESC: End transmission", render.ColorDarkGray, render.ColorBlack)
+		g.Text(2, gridRows-1, "ESC: End transmission", render.ColorDarkGray)
 	} else {
-		buf.WriteString(2, gridRows-1, "1-9: Choose option  ESC: End transmission", render.ColorDarkGray, render.ColorBlack)
+		g.Text(2, gridRows-1, "1-9: Choose option  ESC: End transmission", render.ColorDarkGray)
 	}
 }
 
@@ -1800,6 +1844,9 @@ func (g *Game) updateEncounter() error {
 func (g *Game) drawEpisodeView() {
 	buf := g.buffer
 	buf.Clear()
+
+	// --- HUD backgrounds ---
+	buf.FillRect(0, commsRow, gridCols, gridRows-commsRow, render.ColorDarkGray) // comms area
 
 	ep := g.sim.ActiveEpisode
 	if ep == nil {
@@ -1876,18 +1923,18 @@ func (g *Game) drawEpisodeView() {
 		}
 	}
 
-	// Comms log
-	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	// Comms log (tight text)
+	g.Text(2, commsRow, "--- Comms ---", render.ColorLightCyan)
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		msgClr := msgColor(msg.Priority)
-		buf.WriteString(2, commsRow+1+i, msg.Text, msgClr, render.ColorBlack)
+		g.Text(2, commsRow+1+i, msg.Text, msgClr)
 	}
 
 	if ep.Resolved {
-		buf.WriteString(2, gridRows-1, "ESC: Continue to system map", render.ColorDarkGray, render.ColorBlack)
+		g.Text(2, gridRows-1, "ESC: Continue to system map", render.ColorDarkGray)
 	} else {
-		buf.WriteString(2, gridRows-1, "1-4: Choose option", render.ColorDarkGray, render.ColorBlack)
+		g.Text(2, gridRows-1, "1-4: Choose option", render.ColorDarkGray)
 	}
 }
 
@@ -1943,6 +1990,10 @@ func (g *Game) drawSurfaceView() {
 		return
 	}
 
+	// Fill HUD areas with dark gray background to distinguish from map
+	buf.FillRect(panelX, 0, gridCols-panelX, gridRows, render.ColorDarkGray)    // right panel
+	buf.FillRect(0, commsRow, panelX, gridRows-commsRow, render.ColorDarkGray)  // comms area
+
 	// Camera centers on player (same pattern as ship view)
 	ox := viewCenterX - surf.PlayerX
 	oy := viewCenterY - surf.PlayerY
@@ -1963,20 +2014,20 @@ func (g *Game) drawSurfaceView() {
 		}
 	}
 
-	// --- Right panel: Objective and controls ---
+	// --- Right panel: Objective and controls (tight text) ---
 	cx := panelX
 	cy := 2
 
 	// Title changes based on prologue or regular surface
 	if g.sim.InPrologue() {
-		buf.WriteString(cx, cy, "=== PROLOGUE ===", render.ColorYellow, render.ColorBlack)
+		g.Text(cx, cy, "=== PROLOGUE ===", render.ColorYellow)
 		cy += 2
 		// Show location
 		locName := game.PrologueLocationName(g.sim.Prologue.Location)
-		buf.WriteString(cx, cy, locName, render.ColorLightCyan, render.ColorBlack)
+		g.Text(cx, cy, locName, render.ColorLightCyan)
 		cy += 2
 		// Show prologue objectives with three states: missing, in cargo, installed
-		buf.WriteString(cx, cy, "Shuttle Repairs:", render.ColorYellow, render.ColorBlack)
+		g.Text(cx, cy, "Shuttle Repairs:", render.ColorYellow)
 		cy++
 		ps := g.sim.PrologueSurface
 		for _, obj := range g.sim.Prologue.GetObjectives() {
@@ -2008,15 +2059,15 @@ func (g *Game) drawSurfaceView() {
 				clr = render.ColorYellow
 				hint = " (install)"
 			}
-			buf.WriteString(cx, cy, fmt.Sprintf("%s %s%s", status, name, hint), clr, render.ColorBlack)
+			g.Text(cx, cy, fmt.Sprintf("%s %s%s", status, name, hint), clr)
 			cy++
 		}
 		cy++
 	} else {
-		buf.WriteString(cx, cy, "=== SURFACE ===", render.ColorYellow, render.ColorBlack)
+		g.Text(cx, cy, "=== SURFACE ===", render.ColorYellow)
 		cy += 2
 		// Location info
-		buf.WriteString(cx, cy, fmt.Sprintf("POI: %s", surf.POI), render.ColorLightCyan, render.ColorBlack)
+		g.Text(cx, cy, fmt.Sprintf("POI: %s", surf.POI), render.ColorLightCyan)
 		cy += 2
 		// Objective
 		if surf.Objective != nil {
@@ -2027,61 +2078,61 @@ func (g *Game) drawSurfaceView() {
 				objClr = uint8(render.ColorGreen)
 				status = "[X]"
 			}
-			buf.WriteString(cx, cy, "Objective:", render.ColorYellow, render.ColorBlack)
+			g.Text(cx, cy, "Objective:", render.ColorYellow)
 			cy++
-			buf.WriteString(cx, cy, fmt.Sprintf("%s %s", status, obj.Description), objClr, render.ColorBlack)
+			g.Text(cx, cy, fmt.Sprintf("%s %s", status, obj.Description), objClr)
 			cy += 2
 		}
 	}
 
 	// Loot collected
 	if surf.LootCollected > 0 {
-		buf.WriteString(cx, cy, fmt.Sprintf("Crates searched: %d", surf.LootCollected), render.ColorBrown, render.ColorBlack)
+		g.Text(cx, cy, fmt.Sprintf("Crates searched: %d", surf.LootCollected), render.ColorBrown)
 		cy += 2
 	}
 
 	// Standing on indicator
 	tile := surf.GetTile(surf.PlayerX, surf.PlayerY)
-	buf.WriteString(cx, cy, "Standing on:", render.ColorDarkGray, render.ColorBlack)
+	g.Text(cx, cy, "Standing on:", render.ColorDarkGray)
 	cy++
-	buf.WriteString(cx+1, cy, tile.Describe(), render.ColorLightGray, render.ColorBlack)
+	g.Text(cx, cy, " "+tile.Describe(), render.ColorLightGray)
 
 	// Controls
 	cy = hudRow
-	buf.WriteString(cx, cy, "--- Controls ---", render.ColorDarkGray, render.ColorBlack)
+	g.Text(cx, cy, "--- Controls ---", render.ColorDarkGray)
 	cy++
-	buf.WriteString(cx, cy, "WASD: Move", render.ColorDarkGray, render.ColorBlack)
+	g.Text(cx, cy, "WASD: Move", render.ColorDarkGray)
 	cy++
-	buf.WriteString(cx, cy, "E: Interact/Board", render.ColorDarkGray, render.ColorBlack)
+	g.Text(cx, cy, "E: Interact/Board", render.ColorDarkGray)
 	cy++
-	buf.WriteString(cx, cy, "Pilot to lift off", render.ColorDarkGray, render.ColorBlack)
+	g.Text(cx, cy, "Pilot to lift off", render.ColorDarkGray)
 	cy += 2
 
 	// Show if at shuttle
 	if surf.AtShuttle() {
 		if g.sim.InPrologue() {
 			if g.sim.PrologueSurface.CheckPrologueComplete() {
-				buf.WriteString(cx, cy, ">>> SHUTTLE READY <<<", render.ColorLightGreen, render.ColorBlack)
+				g.Text(cx, cy, ">>> SHUTTLE READY <<<", render.ColorLightGreen)
 				cy++
-				buf.WriteString(cx, cy, "E to board, then pilot", render.ColorLightGreen, render.ColorBlack)
+				g.Text(cx, cy, "E to board, then pilot", render.ColorLightGreen)
 			} else {
-				buf.WriteString(cx, cy, ">>> AT SHUTTLE <<<", render.ColorYellow, render.ColorBlack)
+				g.Text(cx, cy, ">>> AT SHUTTLE <<<", render.ColorYellow)
 				cy++
-				buf.WriteString(cx, cy, "Not ready yet...", render.ColorYellow, render.ColorBlack)
+				g.Text(cx, cy, "Not ready yet...", render.ColorYellow)
 			}
 		} else {
-			buf.WriteString(cx, cy, ">>> AT SHUTTLE <<<", render.ColorLightGreen, render.ColorBlack)
+			g.Text(cx, cy, ">>> AT SHUTTLE <<<", render.ColorLightGreen)
 			cy++
-			buf.WriteString(cx, cy, "E to board", render.ColorLightGreen, render.ColorBlack)
+			g.Text(cx, cy, "E to board", render.ColorLightGreen)
 		}
 	}
 
-	// --- Comms log ---
-	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	// --- Comms log (tight text) ---
+	g.Text(2, commsRow, "--- Comms ---", render.ColorLightCyan)
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		clr := msgColor(msg.Priority)
-		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+		g.Text(2, commsRow+1+i, msg.Text, clr)
 	}
 }
 
@@ -2202,6 +2253,9 @@ func (g *Game) drawCharSheetView() {
 	buf := g.buffer
 	buf.Clear()
 
+	// Full screen UI - dark gray background (not a map)
+	buf.FillRect(0, 0, gridCols, gridRows, render.ColorDarkGray)
+
 	cx := 2
 	skills := &g.sim.Skills
 	disc := g.sim.Discovery
@@ -2321,15 +2375,15 @@ func (g *Game) drawCharSheetView() {
 		}
 	}
 
-	// Comms log
-	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	// Comms log (tight text)
+	g.Text(2, commsRow, "--- Comms ---", render.ColorLightCyan)
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		clr := msgColor(msg.Priority)
-		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+		g.Text(2, commsRow+1+i, msg.Text, clr)
 	}
 
-	buf.WriteString(2, gridRows-1, "Tab/ESC: Back", render.ColorDarkGray, render.ColorBlack)
+	g.Text(2, gridRows-1, "Tab/ESC: Back", render.ColorDarkGray)
 }
 
 func (g *Game) drawSkillBar(buf *render.CellBuffer, x, y int, name string, level int, curXP, neededXP float64) {
@@ -2434,6 +2488,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Render floating sprites (sub-pixel precision) on top of the cell grid
 	for _, s := range g.sprites {
 		g.renderer.DrawFloating(screen, s.Glyph, s.FG, s.PX, s.PY)
+	}
+	// Render tight-spaced UI text on top
+	for _, t := range g.uiText {
+		g.renderer.DrawText(screen, t.X, t.Y, t.Text, t.FG)
 	}
 }
 
