@@ -1979,20 +1979,20 @@ func (g *Game) drawSurfaceView() {
 		ps := g.sim.PrologueSurface
 		for _, obj := range g.sim.Prologue.GetObjectives() {
 			installed := false
-			inCargo := false
+			inInventory := false
 			name := ""
 			switch obj {
 			case game.PrologueObjFuel:
 				installed = ps.FuelFound
-				inCargo = g.sim.Resources.FindPad(game.CargoShuttleFuel) >= 0
+				inInventory = g.sim.Resources.Inventory.HasItem(game.ItemFuelCells)
 				name = "Fuel"
 			case game.PrologueObjParts:
 				installed = ps.PartsFound
-				inCargo = g.sim.Resources.FindPad(game.CargoSpareParts) >= 0
+				inInventory = g.sim.Resources.Inventory.HasItem(game.ItemSpareParts)
 				name = "Parts"
 			case game.PrologueObjPower:
 				installed = ps.PowerFound
-				inCargo = g.sim.Resources.FindPad(game.CargoShuttlePower) >= 0
+				inInventory = g.sim.Resources.Inventory.HasItem(game.ItemPowerPack)
 				name = "Power"
 			}
 			status := "[ ]"
@@ -2001,7 +2001,7 @@ func (g *Game) drawSurfaceView() {
 			if installed {
 				status = "[X]"
 				clr = render.ColorGreen
-			} else if inCargo {
+			} else if inInventory {
 				status = "[~]"
 				clr = render.ColorYellow
 				hint = " (install)"
@@ -2271,6 +2271,26 @@ func (g *Game) drawCharSheetView() {
 	}
 	if perkRow == 7 {
 		buf.WriteString(perkX, perkRow, "Level up skills to unlock perks!", render.ColorDarkGray, render.ColorBlack)
+	}
+
+	// Personal Inventory (right panel, below perks)
+	invRow := 15
+	buf.WriteString(perkX, invRow, "--- Inventory ---", render.ColorLightCyan, render.ColorBlack)
+	invRow++
+	inv := &r.Inventory
+	used := inv.UsedSlots()
+	buf.WriteString(perkX, invRow, fmt.Sprintf("Slots: %d/%d", used, game.MaxInventorySlots), render.ColorDarkGray, render.ColorBlack)
+	invRow++
+	if used == 0 {
+		buf.WriteString(perkX+1, invRow, "Empty", render.ColorDarkGray, render.ColorBlack)
+	} else {
+		for _, slot := range inv.Slots {
+			if slot.Kind != game.ItemNone && slot.Count > 0 {
+				buf.WriteString(perkX+1, invRow, fmt.Sprintf("%s x%d", game.ItemName(slot.Kind), slot.Count),
+					render.ColorWhite, render.ColorBlack)
+				invRow++
+			}
+		}
 	}
 
 	// Recent scans

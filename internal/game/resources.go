@@ -52,6 +52,9 @@ type Resources struct {
 	// Economy
 	Credits   int        // currency
 	CargoPads []CargoPad // cargo bay — each pad holds a stack of one kind
+
+	// Personal inventory — small items the player carries
+	Inventory Inventory
 }
 
 // BodyFullness returns total matter in the player's body.

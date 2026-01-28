@@ -172,7 +172,7 @@ func (s *Sim) InPrologue() bool {
 }
 
 // PrologueInteract handles E key interactions during prologue.
-// Items are picked up into cargo - player must use them at appropriate equipment.
+// Repair items go to personal inventory, loot goes to cargo.
 func (s *Sim) PrologueInteract() {
 	if s.PrologueSurface == nil {
 		return
@@ -182,30 +182,27 @@ func (s *Sim) PrologueInteract() {
 
 	switch tile.Equipment {
 	case world.EquipFuelCell:
-		added := s.Resources.AddCargo(CargoShuttleFuel, 1)
-		if added > 0 {
+		if s.Resources.Inventory.AddItem(ItemFuelCells, 1) {
 			s.Log.Add("Grabbed fuel cells. Use at fuel tank on shuttle.", MsgDiscovery)
 			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
 		} else {
-			s.Log.Add("Cargo full - can't carry fuel cells.", MsgWarning)
+			s.Log.Add("Inventory full - can't carry fuel cells.", MsgWarning)
 		}
 
 	case world.EquipSpareParts:
-		added := s.Resources.AddCargo(CargoSpareParts, 1)
-		if added > 0 {
+		if s.Resources.Inventory.AddItem(ItemSpareParts, 1) {
 			s.Log.Add("Grabbed spare parts. Use at engine on shuttle.", MsgDiscovery)
 			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
 		} else {
-			s.Log.Add("Cargo full - can't carry spare parts.", MsgWarning)
+			s.Log.Add("Inventory full - can't carry spare parts.", MsgWarning)
 		}
 
 	case world.EquipPowerPack:
-		added := s.Resources.AddCargo(CargoShuttlePower, 1)
-		if added > 0 {
+		if s.Resources.Inventory.AddItem(ItemPowerPack, 1) {
 			s.Log.Add("Grabbed power pack. Use at battery on shuttle.", MsgDiscovery)
 			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
 		} else {
-			s.Log.Add("Cargo full - can't carry power pack.", MsgWarning)
+			s.Log.Add("Inventory full - can't carry power pack.", MsgWarning)
 		}
 
 	case world.EquipLootCrate:
@@ -556,13 +553,13 @@ func (s *Sim) Interact() {
 	case world.EquipFuelTank:
 		// During prologue, can install shuttle fuel here
 		if s.InPrologue() && !s.PrologueSurface.FuelFound {
-			if s.Resources.FindPad(CargoShuttleFuel) >= 0 {
-				s.Resources.RemoveCargo(CargoShuttleFuel, 1)
+			if s.Resources.Inventory.HasItem(ItemFuelCells) {
+				s.Resources.Inventory.RemoveItem(ItemFuelCells, 1)
 				s.PrologueSurface.MarkObjectiveFound(PrologueObjFuel)
 				s.Log.Add("Installed fuel cells! Tank filled.", MsgDiscovery)
 				s.checkPrologueReady()
 			} else {
-				s.Log.Add("Fuel tank empty. Need shuttle fuel cells to fill.", MsgWarning)
+				s.Log.Add("Fuel tank empty. Need fuel cells to fill.", MsgWarning)
 			}
 		} else {
 			s.Log.Add(fmt.Sprintf("Fuel tank: %d/%d.", r.JumpFuel, r.MaxJumpFuel), MsgInfo)
@@ -574,8 +571,8 @@ func (s *Sim) Interact() {
 	case world.EquipEngine:
 		// During prologue, can install spare parts here
 		if s.InPrologue() && !s.PrologueSurface.PartsFound {
-			if s.Resources.FindPad(CargoSpareParts) >= 0 {
-				s.Resources.RemoveCargo(CargoSpareParts, 1)
+			if s.Resources.Inventory.HasItem(ItemSpareParts) {
+				s.Resources.Inventory.RemoveItem(ItemSpareParts, 1)
 				s.PrologueSurface.MarkObjectiveFound(PrologueObjParts)
 				s.Log.Add("Installed spare parts! Engine repaired.", MsgDiscovery)
 				s.checkPrologueReady()
@@ -602,8 +599,8 @@ func (s *Sim) Interact() {
 	case world.EquipPowerCell:
 		// During prologue, can install power pack here
 		if s.InPrologue() && !s.PrologueSurface.PowerFound {
-			if s.Resources.FindPad(CargoShuttlePower) >= 0 {
-				s.Resources.RemoveCargo(CargoShuttlePower, 1)
+			if s.Resources.Inventory.HasItem(ItemPowerPack) {
+				s.Resources.Inventory.RemoveItem(ItemPowerPack, 1)
 				s.PrologueSurface.MarkObjectiveFound(PrologueObjPower)
 				s.Log.Add("Installed power pack! Battery charged.", MsgDiscovery)
 				s.checkPrologueReady()
