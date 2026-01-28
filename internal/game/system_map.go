@@ -171,8 +171,11 @@ func (p *ShipPhysics) ClampToBounds(w, h int) {
 type SystemMap struct {
 	Width, Height int
 	Objects       []SpaceObject
-	Shuttle       ShipPhysics // player shuttle (float position, velocity, physics)
+	Shuttle       ShipPhysics  // player shuttle (float position, velocity, physics)
+	Station       *StationData // generated on first dock, nil if no station
 	rng           *rand.Rand
+	seed          int64 // saved for station data generation
+	starName      string
 }
 
 var romanNumerals = []string{"I", "II", "III", "IV", "V"}
@@ -188,7 +191,9 @@ func GenerateSystemMap(seed int64, starType StarType, starName string) *SystemMa
 			X: 10, Y: float64(SystemMapH / 2),
 			Accel: ShuttleAccel, MaxSpeed: ShuttleMaxSpeed, Drag: ShuttleDrag,
 		},
-		rng: rng,
+		rng:      rng,
+		seed:     seed,
+		starName: starName,
 	}
 
 	centerX := SystemMapW / 2
@@ -398,6 +403,31 @@ func (sm *SystemMap) NearestObject(x, y, radius int) *SpaceObject {
 		}
 	}
 	return best
+}
+
+// EnsureStationData generates station data if this system has a station and data hasn't been created yet.
+func (sm *SystemMap) EnsureStationData() *StationData {
+	if sm.Station != nil {
+		return sm.Station
+	}
+	// Find station object
+	for _, obj := range sm.Objects {
+		if obj.Kind == ObjStation {
+			sm.Station = GenerateStationData(sm.seed+999, obj.Name)
+			return sm.Station
+		}
+	}
+	return nil // no station in this system
+}
+
+// FindStation returns the station SpaceObject in this system, or nil.
+func (sm *SystemMap) FindStation() *SpaceObject {
+	for i := range sm.Objects {
+		if sm.Objects[i].Kind == ObjStation {
+			return &sm.Objects[i]
+		}
+	}
+	return nil
 }
 
 func clampInt(v, lo, hi int) int {

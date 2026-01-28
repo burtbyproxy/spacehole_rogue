@@ -42,6 +42,8 @@ type Sim struct {
 	// UI signals (set by Interact, cleared by Game after handling)
 	NavActivated   bool
 	PilotActivated bool
+	DockActivated  bool // set when player docks at a station
+	CargoActivated bool // set when player uses cargo console
 
 	player ecs.Entity
 	posMap *ecs.Map[Position]
@@ -377,7 +379,8 @@ func (s *Sim) Interact() {
 		s.Log.Add(fmt.Sprintf("Viewscreen: %s system. %s.", star.Name, StarTypeName(star.Type)), MsgInfo)
 
 	case world.EquipCargoConsole:
-		s.Log.Add("Cargo console. Jettison not yet available.", MsgInfo)
+		s.CargoActivated = true
+		s.Log.Add("Cargo console activated.", MsgInfo)
 
 	case world.EquipCargoTile:
 		s.Log.Add("Cargo pad. Empty.", MsgInfo)
@@ -420,6 +423,114 @@ func (s *Sim) ToggleEquipment() {
 	default:
 		s.Log.Add("This equipment can't be toggled.", MsgSocial)
 	}
+}
+
+// DockAtStation docks at the current system's station.
+// Performs auto-refill and returns the station data.
+func (s *Sim) DockAtStation() *StationData {
+	sm := s.Sector.CurrentSystemMap()
+	sd := sm.EnsureStationData()
+	if sd == nil {
+		return nil
+	}
+	DockRefill(&s.Resources)
+	s.Log.Add(fmt.Sprintf("Docked at %s. Tanks topped off, energy full.", sd.Name), MsgInfo)
+	return sd
+}
+
+// RepairHull repairs hull points at 2 credits per point.
+// amount = 0 means full repair. Returns credits spent and points repaired.
+func (s *Sim) RepairHull(amount int) (cost int, repaired int) {
+	const costPerPoint = 2
+	damage := s.Resources.MaxHull - s.Resources.Hull
+	if damage == 0 {
+		s.Log.Add("Hull integrity at 100%. No repairs needed.", MsgInfo)
+		return 0, 0
+	}
+	if amount <= 0 || amount > damage {
+		amount = damage
+	}
+	maxAfford := s.Resources.Credits / costPerPoint
+	if amount > maxAfford {
+		amount = maxAfford
+	}
+	if amount == 0 {
+		s.Log.Add("Not enough credits for repairs.", MsgWarning)
+		return 0, 0
+	}
+	cost = amount * costPerPoint
+	s.Resources.Credits -= cost
+	s.Resources.Hull += amount
+	s.Log.Add(fmt.Sprintf("Repaired %d hull pts for %dcr. Hull: %d/%d.",
+		amount, cost, s.Resources.Hull, s.Resources.MaxHull), MsgInfo)
+	return cost, amount
+}
+
+// BuyCargo buys one unit of cargo from the station.
+func (s *Sim) BuyCargo(sd *StationData, kind CargoKind) bool {
+	if !sd.Stocked[kind] || sd.Stock[kind] <= 0 {
+		s.Log.Add("Station has none of that in stock.", MsgWarning)
+		return false
+	}
+	price := sd.SellPrices[kind]
+	if s.Resources.Credits < price {
+		s.Log.Add(fmt.Sprintf("Need %dcr. You have %dcr.", price, s.Resources.Credits), MsgWarning)
+		return false
+	}
+	added := s.Resources.AddCargo(kind, 1)
+	if added == 0 {
+		s.Log.Add("Cargo bay full. No empty pads or stacks.", MsgWarning)
+		return false
+	}
+	s.Resources.Credits -= price
+	sd.Stock[kind]--
+	s.Log.Add(fmt.Sprintf("Bought %s for %dcr.", CargoName(kind), price), MsgInfo)
+	return true
+}
+
+// SellCargo sells one unit from the given pad index.
+func (s *Sim) SellCargo(sd *StationData, padIdx int) bool {
+	if padIdx < 0 || padIdx >= len(s.Resources.CargoPads) {
+		return false
+	}
+	pad := &s.Resources.CargoPads[padIdx]
+	if pad.Kind == CargoNone || pad.Count <= 0 {
+		s.Log.Add("That pad is empty.", MsgWarning)
+		return false
+	}
+	kind := pad.Kind
+	price := sd.BuyPrices[kind]
+	if price <= 0 {
+		price = 1 // station always buys for at least 1
+	}
+	s.Resources.Credits += price
+	sd.Stock[kind]++
+	pad.Count--
+	name := CargoName(kind)
+	if pad.Count == 0 {
+		pad.Kind = CargoNone
+	}
+	s.Log.Add(fmt.Sprintf("Sold %s for %dcr.", name, price), MsgInfo)
+	return true
+}
+
+// JettisonCargo destroys one unit from the given pad index.
+func (s *Sim) JettisonCargo(padIdx int) bool {
+	if padIdx < 0 || padIdx >= len(s.Resources.CargoPads) {
+		return false
+	}
+	pad := &s.Resources.CargoPads[padIdx]
+	if pad.Kind == CargoNone || pad.Count <= 0 {
+		s.Log.Add("That pad is empty.", MsgWarning)
+		return false
+	}
+	name := CargoName(pad.Kind)
+	pad.Count--
+	if pad.Count == 0 {
+		pad.Kind = CargoNone
+	}
+	s.Log.Add(fmt.Sprintf("Jettisoned 1x %s into the void.", name), MsgWarning)
+	return true
 }
 
 // NavigateTo attempts to jump the shuttle to the target star system.

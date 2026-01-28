@@ -42,6 +42,19 @@ const (
 	ViewShip ViewMode = iota
 	ViewSectorMap
 	ViewSystemMap
+	ViewStation
+	ViewCargo
+)
+
+// Station submenu states.
+const (
+	stMenuMain     = 0
+	stMenuRepairs  = 1
+	stMenuTrade    = 2
+	stMenuBuy      = 3
+	stMenuSell     = 4
+	stMenuBar      = 5
+	stMenuFaction  = 6
 )
 
 // floatingSprite is a glyph drawn at sub-pixel screen coordinates,
@@ -61,6 +74,10 @@ type Game struct {
 	sim      *game.Sim
 	viewMode ViewMode
 	sprites  []floatingSprite // sub-tile sprites drawn on top of CellBuffer
+
+	// Station docking state
+	stationMenu int               // current station submenu (stMenu* constants)
+	stationData *game.StationData // current docked station (nil when not docked)
 }
 
 func NewGame() *Game {
@@ -110,6 +127,10 @@ func (g *Game) drawScreen() {
 		g.drawSectorMapView()
 	case ViewSystemMap:
 		g.drawSystemMapView()
+	case ViewStation:
+		g.drawStationView()
+	case ViewCargo:
+		g.drawCargoView()
 	default:
 		g.drawShipView()
 	}
@@ -169,6 +190,9 @@ func (g *Game) drawShipView() {
 	drawMatterBar(buf, 2, hudRow+2, "Organic", &r.Organic, render.ColorGreen, render.ColorDarkGray)
 	drawEnergyBar(buf, 2, hudRow+3, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
 	drawSimpleBar(buf, 2, hudRow+4, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
+	// Credits and cargo
+	buf.WriteString(2, hudRow+5, fmt.Sprintf("Credits: %d  Cargo: %d/%d pads",
+		r.Credits, r.PadsUsed(), len(r.CargoPads)), render.ColorLightCyan, render.ColorBlack)
 	// Player body indicator
 	fullness := r.BodyFullness()
 	if fullness > 0 {
@@ -176,7 +200,7 @@ func (g *Game) drawShipView() {
 		if r.TotalWaste() >= 20 {
 			bodyClr = render.ColorYellow
 		}
-		buf.WriteString(2, hudRow+5, fmt.Sprintf("Body: %d/%d full (%d waste)",
+		buf.WriteString(2, hudRow+6, fmt.Sprintf("Body: %d/%d full (%d waste)",
 			fullness, game.MaxBodyFullness, r.TotalWaste()), bodyClr, render.ColorBlack)
 	}
 
@@ -460,7 +484,7 @@ func (g *Game) drawSystemMapView() {
 		case game.ObjPlanet:
 			buf.WriteString(infoX, row, game.PlanetKindName(nearObj.PlanetType), render.ColorLightGray, render.ColorBlack)
 		case game.ObjStation:
-			buf.WriteString(infoX, row, "Station (docking: future)", render.ColorCyan, render.ColorBlack)
+			buf.WriteString(infoX, row, "Station - press E to dock", render.ColorCyan, render.ColorBlack)
 		case game.ObjDerelict:
 			buf.WriteString(infoX, row, "Derelict - salvageable?", render.ColorDarkGray, render.ColorBlack)
 		case game.ObjShip:
@@ -840,6 +864,10 @@ func (g *Game) Update() error {
 		return g.updateSectorMap()
 	case ViewSystemMap:
 		return g.updateSystemMap()
+	case ViewStation:
+		return g.updateStation()
+	case ViewCargo:
+		return g.updateCargo()
 	default:
 		return g.updateShip()
 	}
@@ -888,6 +916,12 @@ func (g *Game) updateShip() error {
 		g.sim.PilotActivated = false
 		g.sim.Sector.EnsureSystemMap(g.sim.Sector.CurrentSystem)
 		g.viewMode = ViewSystemMap
+	}
+
+	// Cargo console → cargo view (inspect and jettison)
+	if g.sim.CargoActivated {
+		g.sim.CargoActivated = false
+		g.viewMode = ViewCargo
 	}
 
 	// Redraw
@@ -990,12 +1024,22 @@ func (g *Game) updateSystemMap() error {
 		}
 	}
 
-	// E near object → approach interaction
+	// E near object → approach interaction or dock
 	if inpututil.IsKeyJustPressed(ebiten.KeyE) {
 		sm := g.sim.Sector.CurrentSystemMap()
 		obj := sm.NearestObject(sm.Shuttle.TileX(), sm.Shuttle.TileY(), 3)
 		if obj != nil {
-			g.logApproachInfo(obj)
+			if obj.Kind == game.ObjStation {
+				// Dock at station
+				sd := g.sim.DockAtStation()
+				if sd != nil {
+					g.stationData = sd
+					g.stationMenu = stMenuMain
+					g.viewMode = ViewStation
+				}
+			} else {
+				g.logApproachInfo(obj)
+			}
 		} else {
 			g.sim.Log.Add("Nothing nearby to interact with.", game.MsgSocial)
 		}
@@ -1019,7 +1063,7 @@ func (g *Game) logApproachInfo(obj *game.SpaceObject) {
 	case game.ObjPlanet:
 		g.sim.Log.Add(fmt.Sprintf("Orbiting %s. %s.", obj.Name, game.PlanetKindName(obj.PlanetType)), game.MsgDiscovery)
 	case game.ObjStation:
-		g.sim.Log.Add(fmt.Sprintf("Hailing %s. Docking available (future).", obj.Name), game.MsgInfo)
+		g.sim.Log.Add(fmt.Sprintf("Hailing %s. Fly closer and press E to dock.", obj.Name), game.MsgInfo)
 	case game.ObjDerelict:
 		g.sim.Log.Add("Derelict detected on sensors. Salvage potential (future).", game.MsgDiscovery)
 	case game.ObjShip:
@@ -1032,6 +1076,425 @@ func (g *Game) logApproachInfo(obj *game.SpaceObject) {
 			g.sim.Log.Add(fmt.Sprintf("WARNING: %s on intercept course!", obj.Name), game.MsgWarning)
 		}
 	}
+}
+
+// --- Station view ---
+
+func (g *Game) drawStationView() {
+	buf := g.buffer
+	buf.Clear()
+
+	switch g.stationMenu {
+	case stMenuRepairs:
+		g.drawStationRepairs(buf)
+	case stMenuTrade:
+		g.drawStationTrade(buf)
+	case stMenuBuy:
+		g.drawStationBuy(buf)
+	case stMenuSell:
+		g.drawStationSell(buf)
+	case stMenuBar:
+		g.drawStationBar(buf)
+	case stMenuFaction:
+		g.drawStationFaction(buf)
+	default:
+		g.drawStationMain(buf)
+	}
+
+	// Comms log (always visible)
+	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	msgs := g.sim.Log.Recent(commsMax)
+	for i, msg := range msgs {
+		clr := msgColor(msg.Priority)
+		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+	}
+}
+
+func (g *Game) drawStationMain(buf *render.CellBuffer) {
+	sd := g.stationData
+	cx := 4 // content left margin
+
+	// Banner
+	buf.WriteString(cx, 2, "=========================================", render.ColorCyan, render.ColorBlack)
+	buf.WriteString(cx+1, 3, fmt.Sprintf("WELCOME TO %s", sd.Name), render.ColorWhite, render.ColorBlack)
+	buf.WriteString(cx+1, 4, fmt.Sprintf("\"%s\"", sd.Tagline), render.ColorDarkGray, render.ColorBlack)
+	buf.WriteString(cx, 5, "=========================================", render.ColorCyan, render.ColorBlack)
+
+	// Menu
+	buf.WriteString(cx+2, 7, "1. Repairs & Maintenance", render.ColorLightGray, render.ColorBlack)
+	buf.WriteString(cx+2, 8, "2. Trade Goods", render.ColorLightGray, render.ColorBlack)
+	buf.WriteString(cx+2, 9, "3. Bar", render.ColorLightGray, render.ColorBlack)
+	buf.WriteString(cx+2, 10, fmt.Sprintf("4. %s Office", sd.Faction), render.ColorLightGray, render.ColorBlack)
+	buf.WriteString(cx+2, 12, "5. Undock", render.ColorYellow, render.ColorBlack)
+
+	// Footer
+	r := &g.sim.Resources
+	buf.WriteString(cx+2, 14, fmt.Sprintf("Credits: %d    Cargo: %d/%d pads",
+		r.Credits, r.PadsUsed(), len(r.CargoPads)), render.ColorLightCyan, render.ColorBlack)
+	buf.WriteString(cx, 15, "=========================================", render.ColorCyan, render.ColorBlack)
+
+	// Ship status (right panel)
+	infoX := panelX
+	buf.WriteString(infoX, 2, "--- Ship Status ---", render.ColorLightCyan, render.ColorBlack)
+	drawEnergyBar(buf, infoX, 3, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
+	drawSimpleBar(buf, infoX, 4, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
+	drawMatterBar(buf, infoX, 6, "Water  ", &r.Water, render.ColorBlue, render.ColorDarkGray)
+	drawMatterBar(buf, infoX, 7, "Organic", &r.Organic, render.ColorGreen, render.ColorDarkGray)
+
+	buf.WriteString(2, gridRows-1, "1-5: Select  ESC: Undock", render.ColorDarkGray, render.ColorBlack)
+}
+
+func (g *Game) drawStationRepairs(buf *render.CellBuffer) {
+	cx := 4
+	r := &g.sim.Resources
+	damage := r.MaxHull - r.Hull
+
+	buf.WriteString(cx, 2, "--- REPAIRS & MAINTENANCE ---", render.ColorLightCyan, render.ColorBlack)
+	buf.WriteString(cx, 4, fmt.Sprintf("Hull: %d / %d", r.Hull, r.MaxHull), render.ColorWhite, render.ColorBlack)
+	drawSimpleBar(buf, cx, 5, "       ", r.Hull, r.MaxHull, render.ColorLightGray)
+
+	if damage == 0 {
+		buf.WriteString(cx, 7, "Hull integrity at 100%. No repairs needed.", render.ColorLightGreen, render.ColorBlack)
+	} else {
+		fullCost := damage * 2
+		buf.WriteString(cx, 7, fmt.Sprintf("Damage: %d pts   Full repair: %dcr", damage, fullCost), render.ColorYellow, render.ColorBlack)
+		buf.WriteString(cx, 9, fmt.Sprintf("1. Full repair (%dcr)", fullCost), render.ColorLightGray, render.ColorBlack)
+		tenCost := 10 * 2
+		if damage < 10 {
+			tenCost = damage * 2
+		}
+		buf.WriteString(cx, 10, fmt.Sprintf("2. Repair 10 pts (%dcr)", tenCost), render.ColorLightGray, render.ColorBlack)
+	}
+
+	buf.WriteString(cx, 12, fmt.Sprintf("Credits: %d", r.Credits), render.ColorLightCyan, render.ColorBlack)
+	buf.WriteString(cx, 14, "0. Back", render.ColorYellow, render.ColorBlack)
+	buf.WriteString(2, gridRows-1, "1-2: Repair  0: Back", render.ColorDarkGray, render.ColorBlack)
+}
+
+func (g *Game) drawStationTrade(buf *render.CellBuffer) {
+	cx := 4
+
+	buf.WriteString(cx, 2, "--- TRADE GOODS ---", render.ColorLightCyan, render.ColorBlack)
+	buf.WriteString(cx, 4, "1. Buy from station", render.ColorLightGray, render.ColorBlack)
+	buf.WriteString(cx, 5, "2. Sell to station", render.ColorLightGray, render.ColorBlack)
+	buf.WriteString(cx, 7, "0. Back", render.ColorYellow, render.ColorBlack)
+
+	r := &g.sim.Resources
+	buf.WriteString(cx, 9, fmt.Sprintf("Credits: %d    Cargo: %d/%d pads",
+		r.Credits, r.PadsUsed(), len(r.CargoPads)), render.ColorLightCyan, render.ColorBlack)
+
+	buf.WriteString(2, gridRows-1, "1-2: Select  0: Back", render.ColorDarkGray, render.ColorBlack)
+}
+
+func (g *Game) drawStationBuy(buf *render.CellBuffer) {
+	sd := g.stationData
+	cx := 4
+	r := &g.sim.Resources
+
+	buf.WriteString(cx, 2, "--- BUY FROM STATION ---", render.ColorLightCyan, render.ColorBlack)
+
+	stocked := sd.StockedList()
+	row := 4
+	for i, k := range stocked {
+		price := sd.SellPrices[k]
+		stock := sd.Stock[k]
+		clr := uint8(render.ColorLightGray)
+		if stock == 0 {
+			clr = render.ColorDarkGray
+		} else if price > r.Credits {
+			clr = render.ColorDarkGray
+		}
+		label := fmt.Sprintf("%d. %-18s %3dcr  (x%d)", i+1, game.CargoName(k), price, stock)
+		buf.WriteString(cx, row, label, clr, render.ColorBlack)
+		row++
+	}
+
+	row += 1
+	buf.WriteString(cx, row, fmt.Sprintf("Credits: %d    Cargo: %d/%d pads",
+		r.Credits, r.PadsUsed(), len(r.CargoPads)), render.ColorLightCyan, render.ColorBlack)
+	row += 2
+	buf.WriteString(cx, row, "0. Back", render.ColorYellow, render.ColorBlack)
+
+	buf.WriteString(2, gridRows-1, "1-8: Buy item  0: Back", render.ColorDarkGray, render.ColorBlack)
+}
+
+func (g *Game) drawStationSell(buf *render.CellBuffer) {
+	sd := g.stationData
+	cx := 4
+	r := &g.sim.Resources
+
+	buf.WriteString(cx, 2, "--- SELL TO STATION ---", render.ColorLightCyan, render.ColorBlack)
+
+	row := 4
+	anyItems := false
+	for i, pad := range r.CargoPads {
+		if pad.Kind == game.CargoNone {
+			continue
+		}
+		anyItems = true
+		price := sd.BuyPrices[pad.Kind]
+		label := fmt.Sprintf("%d. %-18s %3dcr  (x%d)", i+1, game.CargoName(pad.Kind), price, pad.Count)
+		buf.WriteString(cx, row, label, render.ColorLightGray, render.ColorBlack)
+		row++
+	}
+
+	if !anyItems {
+		buf.WriteString(cx, row, "Cargo bay empty. Nothing to sell.", render.ColorDarkGray, render.ColorBlack)
+		row++
+	}
+
+	row += 1
+	buf.WriteString(cx, row, fmt.Sprintf("Credits: %d    Cargo: %d/%d pads",
+		r.Credits, r.PadsUsed(), len(r.CargoPads)), render.ColorLightCyan, render.ColorBlack)
+	row += 2
+	buf.WriteString(cx, row, "0. Back", render.ColorYellow, render.ColorBlack)
+
+	buf.WriteString(2, gridRows-1, "1-9: Sell from pad  0: Back", render.ColorDarkGray, render.ColorBlack)
+}
+
+func (g *Game) drawStationBar(buf *render.CellBuffer) {
+	sd := g.stationData
+	cx := 4
+
+	buf.WriteString(cx, 2, "--- BAR ---", render.ColorLightCyan, render.ColorBlack)
+
+	// Render bar scene text (may contain \n for multi-line)
+	row := 4
+	line := ""
+	for _, ch := range sd.BarScene {
+		if ch == '\n' {
+			buf.WriteString(cx, row, line, render.ColorLightGray, render.ColorBlack)
+			row++
+			line = ""
+		} else {
+			line += string(ch)
+		}
+	}
+	if line != "" {
+		buf.WriteString(cx, row, line, render.ColorLightGray, render.ColorBlack)
+		row++
+	}
+
+	row += 2
+	buf.WriteString(cx, row, "0. Back", render.ColorYellow, render.ColorBlack)
+	buf.WriteString(2, gridRows-1, "0: Back", render.ColorDarkGray, render.ColorBlack)
+}
+
+func (g *Game) drawStationFaction(buf *render.CellBuffer) {
+	sd := g.stationData
+	cx := 4
+
+	buf.WriteString(cx, 2, fmt.Sprintf("--- %s OFFICE ---", sd.Faction), render.ColorLightCyan, render.ColorBlack)
+
+	buf.WriteString(cx, 4, "A recruiter sits behind a battered desk covered in", render.ColorLightGray, render.ColorBlack)
+	buf.WriteString(cx, 5, "pamphlets. A poster reads:", render.ColorLightGray, render.ColorBlack)
+	buf.WriteString(cx, 7, fmt.Sprintf("\"JOIN THE %s.", sd.Faction), render.ColorWhite, render.ColorBlack)
+	buf.WriteString(cx, 8, " See the galaxy. Die heroically.", render.ColorWhite, render.ColorBlack)
+	buf.WriteString(cx, 9, " Pension not included.\"", render.ColorWhite, render.ColorBlack)
+
+	buf.WriteString(cx, 11, "The USS Monkey Lion emblem hangs on the wall.", render.ColorDarkGray, render.ColorBlack)
+	buf.WriteString(cx, 12, "You get the feeling this is where legends begin.", render.ColorDarkGray, render.ColorBlack)
+	buf.WriteString(cx, 13, "Or at least where the paperwork does.", render.ColorDarkGray, render.ColorBlack)
+
+	buf.WriteString(cx, 15, "\"Nothing available right now, but check back.\"", render.ColorLightGray, render.ColorBlack)
+
+	buf.WriteString(cx, 17, "0. Back", render.ColorYellow, render.ColorBlack)
+	buf.WriteString(2, gridRows-1, "0: Back", render.ColorDarkGray, render.ColorBlack)
+}
+
+func (g *Game) updateStation() error {
+	// ESC always undocks
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.sim.Log.Add("Undocked.", game.MsgInfo)
+		g.stationData = nil
+		g.viewMode = ViewSystemMap
+		g.drawScreen()
+		return nil
+	}
+
+	switch g.stationMenu {
+	case stMenuMain:
+		g.updateStationMain()
+	case stMenuRepairs:
+		g.updateStationRepairs()
+	case stMenuTrade:
+		g.updateStationTrade()
+	case stMenuBuy:
+		g.updateStationBuy()
+	case stMenuSell:
+		g.updateStationSell()
+	case stMenuBar, stMenuFaction:
+		if pressedDigit(0) {
+			g.stationMenu = stMenuMain
+		}
+	}
+
+	g.drawScreen()
+
+	fps := fmt.Sprintf("FPS: %.0f  TPS: %.0f", ebiten.ActualFPS(), ebiten.ActualTPS())
+	g.buffer.WriteString(gridCols-20, gridRows-1, fps, render.ColorDarkGray, render.ColorBlack)
+
+	return nil
+}
+
+func (g *Game) updateStationMain() {
+	if pressedDigit(1) {
+		g.stationMenu = stMenuRepairs
+	} else if pressedDigit(2) {
+		g.stationMenu = stMenuTrade
+	} else if pressedDigit(3) {
+		g.stationMenu = stMenuBar
+	} else if pressedDigit(4) {
+		g.stationMenu = stMenuFaction
+	} else if pressedDigit(5) {
+		g.sim.Log.Add("Undocked.", game.MsgInfo)
+		g.stationData = nil
+		g.viewMode = ViewSystemMap
+	}
+}
+
+func (g *Game) updateStationRepairs() {
+	if pressedDigit(1) {
+		g.sim.RepairHull(0) // 0 = full repair
+	} else if pressedDigit(2) {
+		g.sim.RepairHull(10)
+	} else if pressedDigit(0) {
+		g.stationMenu = stMenuMain
+	}
+}
+
+func (g *Game) updateStationTrade() {
+	if pressedDigit(1) {
+		g.stationMenu = stMenuBuy
+	} else if pressedDigit(2) {
+		g.stationMenu = stMenuSell
+	} else if pressedDigit(0) {
+		g.stationMenu = stMenuMain
+	}
+}
+
+func (g *Game) updateStationBuy() {
+	sd := g.stationData
+	stocked := sd.StockedList()
+	for i, k := range stocked {
+		if pressedDigit(i + 1) {
+			g.sim.BuyCargo(sd, k)
+			break
+		}
+	}
+	if pressedDigit(0) {
+		g.stationMenu = stMenuTrade
+	}
+}
+
+func (g *Game) updateStationSell() {
+	sd := g.stationData
+	r := &g.sim.Resources
+	for i := range r.CargoPads {
+		if pressedDigit(i + 1) {
+			g.sim.SellCargo(sd, i)
+			break
+		}
+	}
+	if pressedDigit(0) {
+		g.stationMenu = stMenuTrade
+	}
+}
+
+// pressedDigit returns true if the number key (0-9) was just pressed.
+func pressedDigit(n int) bool {
+	switch n {
+	case 0:
+		return inpututil.IsKeyJustPressed(ebiten.Key0)
+	case 1:
+		return inpututil.IsKeyJustPressed(ebiten.Key1)
+	case 2:
+		return inpututil.IsKeyJustPressed(ebiten.Key2)
+	case 3:
+		return inpututil.IsKeyJustPressed(ebiten.Key3)
+	case 4:
+		return inpututil.IsKeyJustPressed(ebiten.Key4)
+	case 5:
+		return inpututil.IsKeyJustPressed(ebiten.Key5)
+	case 6:
+		return inpututil.IsKeyJustPressed(ebiten.Key6)
+	case 7:
+		return inpututil.IsKeyJustPressed(ebiten.Key7)
+	case 8:
+		return inpututil.IsKeyJustPressed(ebiten.Key8)
+	case 9:
+		return inpututil.IsKeyJustPressed(ebiten.Key9)
+	}
+	return false
+}
+
+// --- Cargo view ---
+
+func (g *Game) drawCargoView() {
+	buf := g.buffer
+	buf.Clear()
+
+	cx := 4
+	r := &g.sim.Resources
+
+	buf.WriteString(cx, 2, "--- CARGO MANIFEST ---", render.ColorLightCyan, render.ColorBlack)
+	buf.WriteString(cx, 3, fmt.Sprintf("Pads: %d/%d used    Total units: %d",
+		r.PadsUsed(), len(r.CargoPads), r.CargoCount()), render.ColorLightGray, render.ColorBlack)
+
+	row := 5
+	anyItems := false
+	for i, pad := range r.CargoPads {
+		if pad.Kind == game.CargoNone {
+			continue
+		}
+		anyItems = true
+		label := fmt.Sprintf("%d. %-18s x%d", i+1, game.CargoName(pad.Kind), pad.Count)
+		buf.WriteString(cx, row, label, render.ColorLightGray, render.ColorBlack)
+		row++
+	}
+
+	if !anyItems {
+		buf.WriteString(cx, row, "Cargo bay empty.", render.ColorDarkGray, render.ColorBlack)
+		row++
+	}
+
+	row += 1
+	buf.WriteString(cx, row, fmt.Sprintf("Credits: %d", r.Credits), render.ColorLightCyan, render.ColorBlack)
+	row += 2
+	buf.WriteString(cx, row, "Press 1-9 to jettison 1 unit from pad", render.ColorYellow, render.ColorBlack)
+
+	// Comms log
+	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	msgs := g.sim.Log.Recent(commsMax)
+	for i, msg := range msgs {
+		clr := msgColor(msg.Priority)
+		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+	}
+
+	buf.WriteString(2, gridRows-1, "1-9: Jettison from pad  ESC: Back", render.ColorDarkGray, render.ColorBlack)
+}
+
+func (g *Game) updateCargo() error {
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.viewMode = ViewShip
+		g.drawScreen()
+		return nil
+	}
+
+	r := &g.sim.Resources
+	for i := range r.CargoPads {
+		if pressedDigit(i + 1) {
+			g.sim.JettisonCargo(i)
+			break
+		}
+	}
+
+	g.drawScreen()
+
+	fps := fmt.Sprintf("FPS: %.0f  TPS: %.0f", ebiten.ActualFPS(), ebiten.ActualTPS())
+	g.buffer.WriteString(gridCols-20, gridRows-1, fps, render.ColorDarkGray, render.ColorBlack)
+
+	return nil
 }
 
 // updateHoverInfo shows a description of whatever the mouse is hovering over.

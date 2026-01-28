@@ -43,6 +43,10 @@ type Resources struct {
 	BodyWater    int // water being processed (clean, in body)
 	WasteOrganic int // digested food (dirty, needs toilet)
 	WasteWater   int // processed water (dirty, needs toilet)
+
+	// Economy
+	Credits   int        // currency
+	CargoPads []CargoPad // cargo bay — each pad holds a stack of one kind
 }
 
 // BodyFullness returns total matter in the player's body.
@@ -70,7 +74,87 @@ func NewShuttleResources() Resources {
 		// Cryo aftermath: body full of waste, need the toilet
 		WasteOrganic: 10,
 		WasteWater:   5,
+		// Economy
+		Credits:   100,
+		CargoPads: make([]CargoPad, 12), // 12 cargo pads in shuttle
 	}
+}
+
+// CargoCount returns total cargo units across all pads.
+func (r *Resources) CargoCount() int {
+	n := 0
+	for _, p := range r.CargoPads {
+		n += p.Count
+	}
+	return n
+}
+
+// PadsUsed returns the number of non-empty cargo pads.
+func (r *Resources) PadsUsed() int {
+	n := 0
+	for _, p := range r.CargoPads {
+		if p.Kind != CargoNone {
+			n++
+		}
+	}
+	return n
+}
+
+// FindPad returns the index of the pad holding the given kind, or -1.
+func (r *Resources) FindPad(kind CargoKind) int {
+	for i, p := range r.CargoPads {
+		if p.Kind == kind && p.Count > 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+// FindEmptyPad returns the index of the first empty pad, or -1.
+func (r *Resources) FindEmptyPad() int {
+	for i, p := range r.CargoPads {
+		if p.Kind == CargoNone {
+			return i
+		}
+	}
+	return -1
+}
+
+// AddCargo adds units of a cargo kind to the bay.
+// Uses an existing stack or claims an empty pad. Returns amount actually added.
+func (r *Resources) AddCargo(kind CargoKind, amount int) int {
+	idx := r.FindPad(kind)
+	if idx < 0 {
+		idx = r.FindEmptyPad()
+		if idx < 0 {
+			return 0 // no room
+		}
+		r.CargoPads[idx].Kind = kind
+	}
+	pad := &r.CargoPads[idx]
+	space := MaxPerPad - pad.Count
+	if amount > space {
+		amount = space
+	}
+	pad.Count += amount
+	return amount
+}
+
+// RemoveCargo removes units of a cargo kind. Returns amount actually removed.
+func (r *Resources) RemoveCargo(kind CargoKind, amount int) int {
+	idx := r.FindPad(kind)
+	if idx < 0 {
+		return 0
+	}
+	pad := &r.CargoPads[idx]
+	if amount > pad.Count {
+		amount = pad.Count
+	}
+	pad.Count -= amount
+	if pad.Count == 0 {
+		pad.Kind = CargoNone // free the pad
+	}
+	return amount
 }
 
 func (r *Resources) EnergyPct() int { return r.Energy * 100 / r.MaxEnergy }
