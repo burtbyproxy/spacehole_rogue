@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -46,6 +47,8 @@ const (
 	ViewCargo
 	ViewCharSheet
 	ViewEncounter
+	ViewEpisode
+	ViewSurface
 )
 
 // Station submenu states.
@@ -140,6 +143,10 @@ func (g *Game) drawScreen() {
 		g.drawCharSheetView()
 	case ViewEncounter:
 		g.drawEncounterView()
+	case ViewEpisode:
+		g.drawEpisodeView()
+	case ViewSurface:
+		g.drawSurfaceView()
 	default:
 		g.drawShipView()
 	}
@@ -234,6 +241,14 @@ func (g *Game) drawShipView() {
 	drawNeedBar(buf, panelX, row, "Thirst ", n.Thirst)
 	row++
 	drawNeedBar(buf, panelX, row, "Hygiene", n.Hygiene)
+	row += 2
+
+	// Standing on indicator
+	px, py := g.sim.PlayerPos()
+	tile := g.sim.Grid.Get(px, py)
+	buf.WriteString(panelX, row, "Standing on:", render.ColorDarkGray, render.ColorBlack)
+	row++
+	buf.WriteString(panelX+1, row, tile.Describe(), render.ColorLightGray, render.ColorBlack)
 
 	// Message log (live from sim)
 	// Blinking hail alert when pending hail exists
@@ -898,6 +913,10 @@ func (g *Game) Update() error {
 		return g.updateCharSheet()
 	case ViewEncounter:
 		return g.updateEncounter()
+	case ViewEpisode:
+		return g.updateEpisode()
+	case ViewSurface:
+		return g.updateSurface()
 	default:
 		return g.updateShip()
 	}
@@ -905,6 +924,12 @@ func (g *Game) Update() error {
 
 func (g *Game) updateShip() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		if g.sim.IsOrbiting() {
+			// ESC while orbiting → leave orbit, return to system map
+			g.sim.LeaveOrbit()
+			g.viewMode = ViewSystemMap
+			return nil
+		}
 		return ebiten.Termination
 	}
 
@@ -941,9 +966,15 @@ func (g *Game) updateShip() error {
 		g.viewMode = ViewSectorMap
 	}
 
-	// Pilot console → system map (fly around the star system)
-	if g.sim.PilotActivated {
+	// Pilot console → surface (if landed), leave orbit (if orbiting), or system map
+	if g.sim.IsOnSurface() {
+		// Just landed from pilot console — go to surface view
+		g.viewMode = ViewSurface
+	} else if g.sim.PilotActivated {
 		g.sim.PilotActivated = false
+		if g.sim.IsOrbiting() {
+			g.sim.LeaveOrbit()
+		}
 		g.sim.Sector.EnsureSystemMap(g.sim.Sector.CurrentSystem)
 		g.viewMode = ViewSystemMap
 	}
@@ -954,11 +985,15 @@ func (g *Game) updateShip() error {
 		g.viewMode = ViewCargo
 	}
 
-	// Science console → character sheet
+	// Science console → scan orbited planet, or character sheet if not orbiting
 	if g.sim.ScanActivated {
 		g.sim.ScanActivated = false
-		g.prevViewMode = ViewShip
-		g.viewMode = ViewCharSheet
+		if g.sim.IsOrbiting() {
+			g.sim.ScanPlanet(g.sim.OrbitPlanetIdx)
+		} else {
+			g.prevViewMode = ViewShip
+			g.viewMode = ViewCharSheet
+		}
 	}
 
 	// Comms station (viewscreen) → encounter
@@ -1027,7 +1062,11 @@ func (g *Game) updateSectorMap() error {
 		target := g.sim.Sector.CursorSystem
 		if target != g.sim.Sector.CurrentSystem {
 			if g.sim.NavigateTo(target) {
-				g.viewMode = ViewSystemMap
+				if g.sim.ActiveEpisode != nil {
+					g.viewMode = ViewEpisode
+				} else {
+					g.viewMode = ViewSystemMap
+				}
 			}
 		}
 	}
@@ -1100,10 +1139,11 @@ func (g *Game) updateSystemMap() error {
 					g.viewMode = ViewStation
 				}
 			case game.ObjPlanet:
-				// Scan planet
+				// Enter orbit around planet → transitions to ship interior
 				objIdx := g.findObjectIndex(sm, obj)
 				if objIdx >= 0 {
-					g.sim.ScanPlanet(objIdx)
+					g.sim.EnterOrbit(objIdx)
+					g.viewMode = ViewShip
 				}
 			default:
 				g.logApproachInfo(obj)
@@ -1700,6 +1740,344 @@ func (g *Game) updateEncounter() error {
 	g.buffer.WriteString(gridCols-20, gridRows-1, fps, render.ColorDarkGray, render.ColorBlack)
 
 	return nil
+}
+
+// --- Episode view ---
+
+func (g *Game) drawEpisodeView() {
+	buf := g.buffer
+	buf.Clear()
+
+	ep := g.sim.ActiveEpisode
+	if ep == nil {
+		return
+	}
+
+	cx := 4
+
+	// Title
+	buf.WriteString(cx, 1, "=== SYSTEM EVENT ===", render.ColorLightCyan, render.ColorBlack)
+	if ep.Resolved {
+		buf.WriteString(gridCols-16, 1, "ESC: Continue", render.ColorDarkGray, render.ColorBlack)
+	} else {
+		buf.WriteString(gridCols-16, 1, "1-4: Choose", render.ColorDarkGray, render.ColorBlack)
+	}
+
+	buf.WriteString(cx, 2, "=========================================", render.ColorCyan, render.ColorBlack)
+
+	// Episode title
+	buf.WriteString(cx+1, 3, "*** "+ep.Title+" ***", render.ColorYellow, render.ColorBlack)
+
+	// Briefing — word-wrapped
+	wrapWidth := gridCols - cx - 6 // ~70 chars
+	row := 5
+	for _, line := range wrapText(ep.Briefing, wrapWidth) {
+		if row >= commsRow-2 {
+			break
+		}
+		buf.WriteString(cx+1, row, line, render.ColorWhite, render.ColorBlack)
+		row++
+	}
+	row++
+	buf.WriteString(cx, row, "=========================================", render.ColorCyan, render.ColorBlack)
+	row += 2
+
+	// Options
+	for i, opt := range ep.Options {
+		if row >= commsRow-2 {
+			break
+		}
+		label := fmt.Sprintf(" %d. %s", i+1, opt.Label)
+		optClr := uint8(render.ColorLightGray)
+		if !opt.Enabled {
+			optClr = render.ColorDarkGray
+			label += " [" + opt.DisableText + "]"
+		}
+		if ep.Resolved {
+			optClr = render.ColorDarkGray
+		}
+		buf.WriteString(cx, row, label, optClr, render.ColorBlack)
+		row++
+	}
+
+	// Result text (after resolution)
+	if ep.ResultText != "" {
+		row++
+		if row < commsRow-1 {
+			buf.WriteString(cx, row, "-----------------------------------------", render.ColorCyan, render.ColorBlack)
+			row++
+		}
+		for _, line := range wrapText(ep.ResultText, wrapWidth) {
+			if row >= commsRow-1 {
+				break
+			}
+			clr := uint8(render.ColorWhite)
+			if ep.MLClue && (len(line) > 0 && (line[0] == '"' || line[0] == '\'')) {
+				clr = render.ColorLightGreen
+			}
+			buf.WriteString(cx+1, row, line, clr, render.ColorBlack)
+			row++
+		}
+		if row < commsRow-1 {
+			buf.WriteString(cx, row, "-----------------------------------------", render.ColorCyan, render.ColorBlack)
+		}
+	}
+
+	// Comms log
+	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	msgs := g.sim.Log.Recent(commsMax)
+	for i, msg := range msgs {
+		msgClr := msgColor(msg.Priority)
+		buf.WriteString(2, commsRow+1+i, msg.Text, msgClr, render.ColorBlack)
+	}
+
+	if ep.Resolved {
+		buf.WriteString(2, gridRows-1, "ESC: Continue to system map", render.ColorDarkGray, render.ColorBlack)
+	} else {
+		buf.WriteString(2, gridRows-1, "1-4: Choose option", render.ColorDarkGray, render.ColorBlack)
+	}
+}
+
+func (g *Game) updateEpisode() error {
+	ep := g.sim.ActiveEpisode
+
+	// ESC exits after resolution (or skips the episode)
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		if ep != nil && ep.Resolved {
+			g.sim.EndEpisode()
+			g.viewMode = ViewSystemMap
+			g.drawScreen()
+			return nil
+		}
+		// If not resolved, ESC still lets you leave (choosing to ignore)
+		g.sim.EndEpisode()
+		g.viewMode = ViewSystemMap
+		g.drawScreen()
+		return nil
+	}
+
+	if ep != nil && !ep.Resolved {
+		for i := range ep.Options {
+			if pressedDigit(i + 1) {
+				opt := ep.Options[i]
+				if !opt.Enabled {
+					g.sim.Log.Add(opt.DisableText, game.MsgWarning)
+					break
+				}
+				result := g.sim.ResolveEpisodeOption(i)
+				ep.ResultText = result
+				break
+			}
+		}
+	}
+
+	g.drawScreen()
+
+	fps := fmt.Sprintf("FPS: %.0f  TPS: %.0f", ebiten.ActualFPS(), ebiten.ActualTPS())
+	g.buffer.WriteString(gridCols-20, gridRows-1, fps, render.ColorDarkGray, render.ColorBlack)
+
+	return nil
+}
+
+// --- Surface View ---
+
+func (g *Game) drawSurfaceView() {
+	buf := g.buffer
+	buf.Clear()
+
+	surf := g.sim.ActiveSurface
+	if surf == nil {
+		return
+	}
+
+	// Camera centers on player (same pattern as ship view)
+	ox := viewCenterX - surf.PlayerX
+	oy := viewCenterY - surf.PlayerY
+
+	// Render terrain grid
+	render.RenderSurfaceGrid(buf, surf.Grid, surf.TerrainType, ox, oy)
+
+	// Draw player
+	buf.Set(viewCenterX, viewCenterY, '@', render.ColorWhite, render.ColorBlack)
+
+	// Draw shuttle marker if visible
+	shuttleScreenX := surf.ShuttleX + ox
+	shuttleScreenY := surf.ShuttleY + oy
+	if shuttleScreenX >= 0 && shuttleScreenX < gridCols && shuttleScreenY >= 0 && shuttleScreenY < gridRows {
+		// Don't overwrite if player is standing on it
+		if surf.PlayerX != surf.ShuttleX || surf.PlayerY != surf.ShuttleY {
+			buf.Set(shuttleScreenX, shuttleScreenY, 'H', render.ColorWhite, render.ColorDarkGray)
+		}
+	}
+
+	// --- Right panel: Objective and controls ---
+	cx := panelX
+	cy := 2
+
+	buf.WriteString(cx, cy, "=== SURFACE ===", render.ColorYellow, render.ColorBlack)
+	cy += 2
+
+	// Location info
+	buf.WriteString(cx, cy, fmt.Sprintf("POI: %s", surf.POI), render.ColorLightCyan, render.ColorBlack)
+	cy += 2
+
+	// Objective
+	if surf.Objective != nil {
+		obj := surf.Objective
+		objClr := uint8(render.ColorWhite)
+		status := "[ ]"
+		if obj.Complete {
+			objClr = uint8(render.ColorGreen)
+			status = "[X]"
+		}
+		buf.WriteString(cx, cy, "Objective:", render.ColorYellow, render.ColorBlack)
+		cy++
+		buf.WriteString(cx, cy, fmt.Sprintf("%s %s", status, obj.Description), objClr, render.ColorBlack)
+		cy += 2
+	}
+
+	// Loot collected
+	if surf.LootCollected > 0 {
+		buf.WriteString(cx, cy, fmt.Sprintf("Crates searched: %d", surf.LootCollected), render.ColorBrown, render.ColorBlack)
+		cy += 2
+	}
+
+	// Standing on indicator
+	tile := surf.GetTile(surf.PlayerX, surf.PlayerY)
+	buf.WriteString(cx, cy, "Standing on:", render.ColorDarkGray, render.ColorBlack)
+	cy++
+	buf.WriteString(cx+1, cy, tile.Describe(), render.ColorLightGray, render.ColorBlack)
+
+	// Controls
+	cy = hudRow
+	buf.WriteString(cx, cy, "--- Controls ---", render.ColorDarkGray, render.ColorBlack)
+	cy++
+	buf.WriteString(cx, cy, "WASD: Move", render.ColorDarkGray, render.ColorBlack)
+	cy++
+	buf.WriteString(cx, cy, "E: Interact", render.ColorDarkGray, render.ColorBlack)
+	cy++
+	buf.WriteString(cx, cy, "At shuttle: Lift off", render.ColorDarkGray, render.ColorBlack)
+	cy += 2
+
+	// Show if at shuttle
+	if surf.AtShuttle() {
+		buf.WriteString(cx, cy, ">>> AT SHUTTLE <<<", render.ColorLightGreen, render.ColorBlack)
+		cy++
+		buf.WriteString(cx, cy, "Press E to lift off", render.ColorLightGreen, render.ColorBlack)
+	}
+
+	// --- Comms log ---
+	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	msgs := g.sim.Log.Recent(commsMax)
+	for i, msg := range msgs {
+		clr := msgColor(msg.Priority)
+		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+	}
+}
+
+func (g *Game) updateSurface() error {
+	surf := g.sim.ActiveSurface
+	if surf == nil {
+		// Shouldn't happen, but safety fallback
+		g.viewMode = ViewShip
+		return nil
+	}
+
+	// Movement
+	dx, dy := 0, 0
+	if inpututil.IsKeyJustPressed(ebiten.KeyW) || inpututil.IsKeyJustPressed(ebiten.KeyUp) {
+		dy = -1
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyS) || inpututil.IsKeyJustPressed(ebiten.KeyDown) {
+		dy = 1
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyA) || inpututil.IsKeyJustPressed(ebiten.KeyLeft) {
+		dx = -1
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyD) || inpututil.IsKeyJustPressed(ebiten.KeyRight) {
+		dx = 1
+	}
+	if dx != 0 || dy != 0 {
+		g.sim.TrySurfaceMove(dx, dy)
+	}
+
+	// Interact
+	if inpututil.IsKeyJustPressed(ebiten.KeyE) {
+		if surf.AtShuttle() {
+			// Lift off
+			g.sim.LiftOff()
+			g.viewMode = ViewShip
+			return nil
+		}
+		g.sim.SurfaceInteract()
+	}
+
+	// ESC shows reminder
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.sim.Log.Add("Return to the shuttle (H) to lift off.", game.MsgInfo)
+	}
+
+	// Tab → character sheet
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
+		g.prevViewMode = ViewSurface
+		g.viewMode = ViewCharSheet
+		return nil
+	}
+
+	g.drawScreen()
+
+	fps := fmt.Sprintf("FPS: %.0f  TPS: %.0f", ebiten.ActualFPS(), ebiten.ActualTPS())
+	g.buffer.WriteString(gridCols-20, gridRows-1, fps, render.ColorDarkGray, render.ColorBlack)
+
+	return nil
+}
+
+// wrapText splits text by newlines and then word-wraps each line to maxWidth.
+func wrapText(s string, maxWidth int) []string {
+	var result []string
+	for _, paragraph := range splitLines(s) {
+		if len(paragraph) <= maxWidth {
+			result = append(result, paragraph)
+			continue
+		}
+		// Word-wrap this paragraph
+		words := strings.Fields(paragraph)
+		if len(words) == 0 {
+			result = append(result, "")
+			continue
+		}
+		line := words[0]
+		for _, w := range words[1:] {
+			if len(line)+1+len(w) > maxWidth {
+				result = append(result, line)
+				line = w
+			} else {
+				line += " " + w
+			}
+		}
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+	return result
+}
+
+// splitLines splits a string by newlines for multi-line rendering.
+func splitLines(s string) []string {
+	var lines []string
+	line := ""
+	for _, ch := range s {
+		if ch == '\n' {
+			lines = append(lines, line)
+			line = ""
+		} else {
+			line += string(ch)
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 // --- Character Sheet view ---

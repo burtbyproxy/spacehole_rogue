@@ -1,5 +1,15 @@
 package world
 
+// TerrainType determines the visual palette for surface tiles.
+type TerrainType uint8
+
+const (
+	TerrainRocky    TerrainType = iota // brown/gray rocks
+	TerrainIce                          // cyan/white ice
+	TerrainVolcanic                     // red/orange lava
+	TerrainInterior                     // standard ship/base interior
+)
+
 // TileKind represents the structural type of a tile.
 type TileKind uint8
 
@@ -8,6 +18,11 @@ const (
 	TileFloor                 // walkable floor
 	TileWall                  // impassable wall
 	TileDoor                  // door (walkable, can open/close)
+	// Surface terrain tiles
+	TileGround     // walkable terrain (color varies by TerrainType)
+	TileRock       // impassable terrain obstacle
+	TileHazard     // impassable hazard (lava, crevasse)
+	TileShuttlePad // landing/exit point (walkable)
 )
 
 // EquipmentKind identifies fixed equipment placed on a floor tile.
@@ -35,6 +50,10 @@ const (
 	EquipPowerCell                     // energy storage (battery)
 	EquipGenerator                     // power generator
 	EquipCargoTile                     // designated cargo storage pad
+	// Surface equipment
+	EquipTerminal   // interactable terminal (objective target)
+	EquipLootCrate  // searchable container
+	EquipObjective  // glowing objective marker
 )
 
 // Tile represents a single map tile.
@@ -77,7 +96,12 @@ func (g *TileGrid) Set(x, y int, t Tile) {
 // IsWalkable returns true if an entity can walk on (x, y).
 func (g *TileGrid) IsWalkable(x, y int) bool {
 	t := g.Get(x, y)
-	return t.Kind == TileFloor || t.Kind == TileDoor
+	switch t.Kind {
+	case TileFloor, TileDoor, TileGround, TileShuttlePad:
+		return true
+	default:
+		return false
+	}
 }
 
 // Describe returns a human-readable description of a tile.
@@ -89,10 +113,14 @@ func (t Tile) Describe() string {
 }
 
 var tileDescriptions = map[TileKind]string{
-	TileVoid:  "Empty space",
-	TileFloor: "Floor",
-	TileWall:  "Hull wall",
-	TileDoor:  "Door",
+	TileVoid:       "Empty space",
+	TileFloor:      "Floor",
+	TileWall:       "Hull wall",
+	TileDoor:       "Door",
+	TileGround:     "Ground",
+	TileRock:       "Rock formation",
+	TileHazard:     "Hazardous terrain",
+	TileShuttlePad: "Shuttle landing pad",
 }
 
 var equipDescriptions = map[EquipmentKind]string{
@@ -116,4 +144,7 @@ var equipDescriptions = map[EquipmentKind]string{
 	EquipPowerCell:      "Battery - stores energy for ship systems",
 	EquipGenerator:      "Generator - produces energy",
 	EquipCargoTile:      "Cargo Pad - designated cargo space",
+	EquipTerminal:       "Terminal - data access point",
+	EquipLootCrate:      "Crate - searchable container",
+	EquipObjective:      "Objective - mission target",
 }

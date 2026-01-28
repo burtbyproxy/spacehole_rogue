@@ -16,6 +16,8 @@ type DiscoveryLog struct {
 	TotalSystemsVisited int
 	TotalStarTypesSeen  int
 	TotalStationsDocked int
+	EpisodesCompleted   int
+	MLCluesFound        int
 
 	RecentScans []PlanetScanData // ordered newest-first, capped at 10
 }

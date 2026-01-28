@@ -82,7 +82,111 @@ func equipVisuals(eq world.EquipmentKind) (glyph byte, fg, bg uint8) {
 	// --- cargo ---
 	case world.EquipCargoTile:
 		return 176, ColorDarkGray, ColorBlack // ░ cargo pad
+	// --- surface equipment ---
+	case world.EquipTerminal:
+		return 'T', ColorLightCyan, ColorBlack // terminal
+	case world.EquipLootCrate:
+		return 'L', ColorBrown, ColorBlack // loot crate
+	case world.EquipObjective:
+		return '*', ColorYellow, ColorBlack // objective marker
 	default:
 		return '?', ColorWhite, ColorBlack
+	}
+}
+
+// RenderSurfaceGrid writes a surface TileGrid with terrain-specific visuals.
+func RenderSurfaceGrid(buf *CellBuffer, grid *world.TileGrid, terrain world.TerrainType, offsetX, offsetY int) {
+	for y := 0; y < grid.Height; y++ {
+		for x := 0; x < grid.Width; x++ {
+			tile := grid.Get(x, y)
+			glyph, fg, bg := surfaceTileVisuals(tile, terrain)
+			buf.Set(offsetX+x, offsetY+y, glyph, fg, bg)
+		}
+	}
+}
+
+// surfaceTileVisuals returns glyph/colors for terrain-aware tiles.
+func surfaceTileVisuals(t world.Tile, terrain world.TerrainType) (glyph byte, fg, bg uint8) {
+	// Equipment takes priority (same as ship)
+	if t.Equipment != world.EquipNone {
+		return equipVisuals(t.Equipment)
+	}
+
+	// Terrain-specific tile appearance
+	switch t.Kind {
+	case world.TileGround:
+		return terrainGround(terrain)
+	case world.TileRock:
+		return terrainRock(terrain)
+	case world.TileHazard:
+		return terrainHazard(terrain)
+	case world.TileShuttlePad:
+		return terrainShuttlePad(terrain)
+	case world.TileWall:
+		// Structures use standard wall visuals
+		return '#', ColorLightGray, ColorDarkGray
+	case world.TileFloor:
+		// Structures use standard floor visuals
+		return '.', ColorDarkGray, ColorBlack
+	case world.TileDoor:
+		return '+', ColorBrown, ColorBlack
+	default:
+		return ' ', ColorBlack, ColorBlack
+	}
+}
+
+func terrainGround(terrain world.TerrainType) (byte, uint8, uint8) {
+	switch terrain {
+	case world.TerrainRocky:
+		return '.', ColorBrown, ColorBlack
+	case world.TerrainIce:
+		return '.', ColorLightCyan, ColorBlack
+	case world.TerrainVolcanic:
+		return '.', ColorRed, ColorBlack
+	case world.TerrainInterior:
+		return '.', ColorDarkGray, ColorBlack
+	default:
+		return '.', ColorDarkGray, ColorBlack
+	}
+}
+
+func terrainRock(terrain world.TerrainType) (byte, uint8, uint8) {
+	switch terrain {
+	case world.TerrainRocky:
+		return '#', ColorLightGray, ColorDarkGray
+	case world.TerrainIce:
+		return '#', ColorWhite, ColorCyan
+	case world.TerrainVolcanic:
+		return '#', ColorBrown, ColorRed
+	case world.TerrainInterior:
+		return '#', ColorLightGray, ColorDarkGray
+	default:
+		return '#', ColorLightGray, ColorDarkGray
+	}
+}
+
+func terrainHazard(terrain world.TerrainType) (byte, uint8, uint8) {
+	switch terrain {
+	case world.TerrainRocky:
+		return '^', ColorRed, ColorBlack // unstable ground
+	case world.TerrainIce:
+		return '~', ColorBlue, ColorBlack // crevasse
+	case world.TerrainVolcanic:
+		return '~', ColorYellow, ColorRed // lava
+	case world.TerrainInterior:
+		return '!', ColorRed, ColorBlack // breach/danger
+	default:
+		return '!', ColorRed, ColorBlack
+	}
+}
+
+func terrainShuttlePad(terrain world.TerrainType) (byte, uint8, uint8) {
+	switch terrain {
+	case world.TerrainIce:
+		return 'H', ColorWhite, ColorCyan
+	case world.TerrainVolcanic:
+		return 'H', ColorWhite, ColorRed
+	default:
+		return 'H', ColorWhite, ColorDarkGray
 	}
 }

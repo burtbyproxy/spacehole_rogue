@@ -47,6 +47,15 @@ type Sim struct {
 	PendingHail     *HailState
 	ActiveEncounter *EncounterState
 
+	// Episode state
+	ActiveEpisode *EpisodeState
+
+	// Orbit state — when the player is orbiting a planet from the system map
+	OrbitPlanetIdx int // index into SystemMap.Objects, or -1 if not orbiting
+
+	// Surface exploration state
+	ActiveSurface *SurfaceMap // nil when not on surface
+
 	// UI signals (set by Interact, cleared by Game after handling)
 	NavActivated    bool
 	PilotActivated  bool
@@ -85,19 +94,20 @@ func NewSim(layout *world.ShipLayout) *Sim {
 	disc.TotalStarTypesSeen = 1
 
 	return &Sim{
-		ECS:         w,
-		Grid:        grid,
-		Layout:      layout,
-		Resources:   NewShuttleResources(),
-		Needs:       PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20},
-		Log:         log,
-		Sector:      sector,
-		Discovery:   disc,
-		EngineOn:    true,
-		GeneratorOn: true,
-		RecyclerOn:  true,
-		player:      player,
-		posMap:      posMap,
+		ECS:            w,
+		Grid:           grid,
+		Layout:         layout,
+		Resources:      NewShuttleResources(),
+		Needs:          PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20},
+		Log:            log,
+		Sector:         sector,
+		Discovery:      disc,
+		EngineOn:       true,
+		GeneratorOn:    true,
+		RecyclerOn:     true,
+		OrbitPlanetIdx: -1,
+		player:         player,
+		posMap:         posMap,
 	}
 }
 
@@ -360,12 +370,32 @@ func (s *Sim) Interact() {
 		s.Log.Add("Navigation console activated.", MsgInfo)
 
 	case world.EquipPilotConsole:
-		s.PilotActivated = true
-		s.Log.Add("Pilot station. Launching system view.", MsgInfo)
+		if s.IsOrbiting() {
+			// Check if planet has a scanned POI for landing
+			scanKey := ScanKey(s.Sector.CurrentSystem, s.OrbitPlanetIdx)
+			if scan, ok := s.Discovery.PlanetsScanned[scanKey]; ok && scan.POI != "" {
+				// POI exists — land on surface
+				s.LandOnPlanet()
+				s.Log.Add(fmt.Sprintf("Landing at %s...", scan.POI), MsgDiscovery)
+			} else {
+				// No POI — leave orbit
+				s.LeaveOrbit()
+				s.PilotActivated = true
+			}
+		} else {
+			s.PilotActivated = true
+			s.Log.Add("Pilot station. Launching system view.", MsgInfo)
+		}
 
 	case world.EquipScienceConsole:
 		s.ScanActivated = true
-		s.Log.Add("Science station active. Deborah left her notes. They're just hoof prints.", MsgSocial)
+		if s.IsOrbiting() {
+			sm := s.Sector.CurrentSystemMap()
+			obj := &sm.Objects[s.OrbitPlanetIdx]
+			s.Log.Add(fmt.Sprintf("Scanning %s from orbit...", obj.Name), MsgInfo)
+		} else {
+			s.Log.Add("Science station active. Deborah left her notes. They're just hoof prints.", MsgSocial)
+		}
 
 	case world.EquipIncinerator:
 		s.Log.Add("Incinerator. Not yet operational.", MsgInfo)
@@ -613,9 +643,10 @@ func (s *Sim) NavigateTo(targetIdx int) bool {
 // OnSystemVisited handles first-visit discovery bonuses for a star system.
 func (s *Sim) OnSystemVisited(sysIdx int) {
 	star := s.Sector.Systems[sysIdx]
+	firstVisit := !s.Discovery.SystemsVisited[sysIdx]
 
 	// First time visiting this specific system?
-	if !s.Discovery.SystemsVisited[sysIdx] {
+	if firstVisit {
 		s.Discovery.SystemsVisited[sysIdx] = true
 		s.Discovery.TotalSystemsVisited++
 		s.Resources.Credits += 10
@@ -633,6 +664,15 @@ func (s *Sim) OnSystemVisited(sysIdx int) {
 		s.Log.Add(fmt.Sprintf("New star type logged: %s! +25cr.", StarTypeName(star.Type)), MsgDiscovery)
 		if s.Skills.AddXP(SkillScience, 15.0) {
 			LogLevelUp(s.Log, SkillScience, s.Skills.Level(SkillScience))
+		}
+	}
+
+	// Roll for episode (only on first visit)
+	if firstVisit && s.ActiveEpisode == nil {
+		ep := RollEpisode(s.Sector.Seed, sysIdx, star.Name, &s.Skills)
+		if ep != nil {
+			s.ActiveEpisode = ep
+			s.Log.Add(">>> EVENT DETECTED <<<", MsgDiscovery)
 		}
 	}
 }
@@ -772,4 +812,166 @@ func (s *Sim) ResolveEncounterOption(optionIdx int) string {
 // EndEncounter clears the active encounter.
 func (s *Sim) EndEncounter() {
 	s.ActiveEncounter = nil
+}
+
+// ResolveEpisodeOption processes the player's choice in an active episode.
+func (s *Sim) ResolveEpisodeOption(optionIdx int) string {
+	if s.ActiveEpisode == nil {
+		return ""
+	}
+	return ResolveEpisode(s, s.ActiveEpisode, optionIdx)
+}
+
+// EndEpisode clears the active episode.
+func (s *Sim) EndEpisode() {
+	s.ActiveEpisode = nil
+}
+
+// EnterOrbit puts the shuttle into orbit around a planet.
+func (s *Sim) EnterOrbit(objIdx int) {
+	sm := s.Sector.CurrentSystemMap()
+	obj := &sm.Objects[objIdx]
+	s.OrbitPlanetIdx = objIdx
+	s.Log.Add(fmt.Sprintf("Entering orbit around %s. %s.", obj.Name, PlanetKindName(obj.PlanetType)), MsgDiscovery)
+	s.Log.Add("Use the science station to scan. Pilot station to leave orbit.", MsgInfo)
+}
+
+// LeaveOrbit exits orbit and returns to free flight.
+func (s *Sim) LeaveOrbit() {
+	if s.OrbitPlanetIdx < 0 {
+		return
+	}
+	sm := s.Sector.CurrentSystemMap()
+	obj := &sm.Objects[s.OrbitPlanetIdx]
+	s.Log.Add(fmt.Sprintf("Breaking orbit from %s.", obj.Name), MsgInfo)
+	s.OrbitPlanetIdx = -1
+}
+
+// IsOrbiting returns true if the shuttle is currently orbiting a planet.
+func (s *Sim) IsOrbiting() bool {
+	return s.OrbitPlanetIdx >= 0
+}
+
+// --- Surface exploration ---
+
+// IsOnSurface returns true if the player is exploring a planetary surface.
+func (s *Sim) IsOnSurface() bool {
+	return s.ActiveSurface != nil
+}
+
+// LandOnPlanet generates a surface map and transitions to surface exploration.
+func (s *Sim) LandOnPlanet() {
+	if s.OrbitPlanetIdx < 0 {
+		return
+	}
+	sm := s.Sector.CurrentSystemMap()
+	obj := &sm.Objects[s.OrbitPlanetIdx]
+
+	// Get scan data for POI
+	scanKey := ScanKey(s.Sector.CurrentSystem, s.OrbitPlanetIdx)
+	scan, ok := s.Discovery.PlanetsScanned[scanKey]
+	poi := ""
+	if ok {
+		poi = scan.POI
+	}
+
+	// Generate surface map
+	seed := s.Sector.Seed*5000 + int64(s.Sector.CurrentSystem)*100 + int64(s.OrbitPlanetIdx)
+	s.ActiveSurface = GenerateSurfaceMap(seed, s.OrbitPlanetIdx, obj.PlanetType, poi)
+
+	s.Log.Add("Touchdown. Explore the area and return to the shuttle.", MsgInfo)
+	if s.ActiveSurface.Objective != nil {
+		s.Log.Add(fmt.Sprintf("Objective: %s", s.ActiveSurface.Objective.Description), MsgDiscovery)
+	}
+}
+
+// SurfacePlayerPos returns the player's position on the active surface.
+func (s *Sim) SurfacePlayerPos() (int, int) {
+	if s.ActiveSurface == nil {
+		return 0, 0
+	}
+	return s.ActiveSurface.PlayerX, s.ActiveSurface.PlayerY
+}
+
+// TrySurfaceMove attempts to move the player on the surface. Returns true if moved.
+func (s *Sim) TrySurfaceMove(dx, dy int) bool {
+	if s.ActiveSurface == nil {
+		return false
+	}
+	return s.ActiveSurface.TryMove(dx, dy)
+}
+
+// SurfaceInteract handles E key interactions on the surface.
+func (s *Sim) SurfaceInteract() {
+	if s.ActiveSurface == nil {
+		return
+	}
+	surf := s.ActiveSurface
+	tile := surf.GetTile(surf.PlayerX, surf.PlayerY)
+
+	switch tile.Equipment {
+	case world.EquipTerminal:
+		s.Log.Add("Accessing terminal... Data retrieved.", MsgInfo)
+		if surf.Objective != nil && surf.Objective.Kind == ObjReachTerminal &&
+			surf.PlayerX == surf.Objective.TargetX && surf.PlayerY == surf.Objective.TargetY {
+			surf.Objective.Complete = true
+			s.Log.Add("*** OBJECTIVE COMPLETE ***", MsgDiscovery)
+			if s.Skills.AddXP(SkillScience, 8.0) {
+				LogLevelUp(s.Log, SkillScience, s.Skills.Level(SkillScience))
+			}
+		}
+
+	case world.EquipLootCrate:
+		// Search crate for loot
+		surf.LootCollected++
+		// Random cargo
+		cargoKind := CargoKind(CargoScrapMetal + CargoKind(surf.LootCollected%5))
+		added := s.Resources.AddCargo(cargoKind, 1)
+		if added > 0 {
+			s.Log.Add(fmt.Sprintf("Found %s in the crate!", CargoName(cargoKind)), MsgDiscovery)
+		} else {
+			s.Log.Add("Crate searched. Cargo bay full.", MsgWarning)
+		}
+		// Remove the crate equipment so it can't be searched again
+		surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: world.TileFloor})
+
+	case world.EquipObjective:
+		s.Log.Add("Artifact retrieved!", MsgDiscovery)
+		if surf.Objective != nil && surf.Objective.Kind == ObjFindItem {
+			surf.Objective.Complete = true
+			s.Log.Add("*** OBJECTIVE COMPLETE ***", MsgDiscovery)
+			// Add the item to cargo
+			added := s.Resources.AddCargo(surf.Objective.ItemKind, 1)
+			if added > 0 {
+				s.Log.Add(fmt.Sprintf("Acquired %s.", CargoName(surf.Objective.ItemKind)), MsgInfo)
+			}
+			if s.Skills.AddXP(SkillScience, 8.0) {
+				LogLevelUp(s.Log, SkillScience, s.Skills.Level(SkillScience))
+			}
+		}
+		// Remove the objective marker
+		surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: world.TileFloor})
+
+	default:
+		s.Log.Add("Nothing to interact with here.", MsgSocial)
+	}
+}
+
+// LiftOff ends surface exploration and returns to orbit.
+func (s *Sim) LiftOff() {
+	if s.ActiveSurface == nil {
+		return
+	}
+	surf := s.ActiveSurface
+
+	// Award rewards
+	if surf.Objective != nil && surf.Objective.Complete {
+		s.Resources.Credits += 25
+		s.Log.Add("Mission complete! +25cr.", MsgDiscovery)
+	} else if surf.Objective != nil {
+		s.Log.Add("Objective abandoned.", MsgWarning)
+	}
+
+	s.Log.Add("Lifting off. Returning to orbit.", MsgInfo)
+	s.ActiveSurface = nil
 }

@@ -31,3 +31,5 @@ __debug_bin*
 # Game saves
 *.db
 saves/
+
+.claude/
