@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 )
@@ -46,7 +47,8 @@ type SpaceObject struct {
 	DX, DY     int        // movement direction for ships
 	MoveRate   int        // ticks between moves for ships
 	moveTimer  int
-	dirTimer   int // ticks until next direction change
+	dirTimer   int  // ticks until next direction change
+	Hailed     bool // true once this ship has hailed the player (won't hail again)
 }
 
 // System map dimensions (scrolling space, much larger than screen).
@@ -301,18 +303,20 @@ func shipAIParams(kind ShipAIKind) (moveRate, dirTime int) {
 }
 
 func shipAIName(kind ShipAIKind, rng *rand.Rand) string {
-	var names []string
+	var classNames []string
 	switch kind {
 	case AITrader:
-		names = []string{"Merchant Vessel", "Trade Runner", "Cargo Hauler", "Supply Ship"}
+		classNames = []string{"Merchant Vessel", "Trade Runner", "Cargo Hauler", "Supply Ship"}
 	case AIPatrol:
-		names = []string{"Patrol Craft", "Security Corvette", "Scout Ship", "Picket Ship"}
+		classNames = []string{"Patrol Craft", "Security Corvette", "Scout Ship", "Picket Ship"}
 	case AIPirate:
-		names = []string{"Raider", "Corsair", "Marauder", "Brigand"}
+		classNames = []string{"Raider", "Corsair", "Marauder", "Brigand"}
 	default:
 		return "Unknown Vessel"
 	}
-	return names[rng.IntN(len(names))]
+	className := classNames[rng.IntN(len(classNames))]
+	properName := ShipProperName(kind, rng.IntN(100))
+	return fmt.Sprintf("%s \"%s\"", className, properName)
 }
 
 // TickNPCs advances all NPC ships by one step.

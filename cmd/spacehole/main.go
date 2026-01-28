@@ -45,6 +45,7 @@ const (
 	ViewStation
 	ViewCargo
 	ViewCharSheet
+	ViewEncounter
 )
 
 // Station submenu states.
@@ -137,6 +138,8 @@ func (g *Game) drawScreen() {
 		g.drawCargoView()
 	case ViewCharSheet:
 		g.drawCharSheetView()
+	case ViewEncounter:
+		g.drawEncounterView()
 	default:
 		g.drawShipView()
 	}
@@ -233,7 +236,12 @@ func (g *Game) drawShipView() {
 	drawNeedBar(buf, panelX, row, "Hygiene", n.Hygiene)
 
 	// Message log (live from sim)
-	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	// Blinking hail alert when pending hail exists
+	if g.sim.PendingHail != nil && (g.sim.Ticks/30)%2 == 0 {
+		buf.WriteString(2, commsRow, ">>> INCOMING HAIL <<<", render.ColorYellow, render.ColorBlack)
+	} else {
+		buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	}
 	msgs := g.sim.Log.Recent(commsMax)
 	for i, msg := range msgs {
 		clr := msgColor(msg.Priority)
@@ -888,6 +896,8 @@ func (g *Game) Update() error {
 		return g.updateCargo()
 	case ViewCharSheet:
 		return g.updateCharSheet()
+	case ViewEncounter:
+		return g.updateEncounter()
 	default:
 		return g.updateShip()
 	}
@@ -949,6 +959,16 @@ func (g *Game) updateShip() error {
 		g.sim.ScanActivated = false
 		g.prevViewMode = ViewShip
 		g.viewMode = ViewCharSheet
+	}
+
+	// Comms station (viewscreen) → encounter
+	if g.sim.CommsActivated {
+		g.sim.CommsActivated = false
+		g.sim.StartEncounter()
+		if g.sim.ActiveEncounter != nil {
+			g.prevViewMode = ViewShip
+			g.viewMode = ViewEncounter
+		}
 	}
 
 	// Tab → character sheet
@@ -1535,6 +1555,142 @@ func (g *Game) updateCargo() error {
 		if pressedDigit(i + 1) {
 			g.sim.JettisonCargo(i)
 			break
+		}
+	}
+
+	g.drawScreen()
+
+	fps := fmt.Sprintf("FPS: %.0f  TPS: %.0f", ebiten.ActualFPS(), ebiten.ActualTPS())
+	g.buffer.WriteString(gridCols-20, gridRows-1, fps, render.ColorDarkGray, render.ColorBlack)
+
+	return nil
+}
+
+// --- Encounter view ---
+
+func (g *Game) drawEncounterView() {
+	buf := g.buffer
+	buf.Clear()
+
+	enc := g.sim.ActiveEncounter
+	if enc == nil {
+		return
+	}
+
+	cx := 4
+
+	// Title
+	buf.WriteString(cx, 1, "=== ENCOUNTER ===", render.ColorLightCyan, render.ColorBlack)
+	buf.WriteString(gridCols-12, 1, "ESC: End", render.ColorDarkGray, render.ColorBlack)
+
+	// Ship info
+	buf.WriteString(cx, 2, "=========================================", render.ColorCyan, render.ColorBlack)
+	buf.WriteString(cx+1, 3, "INCOMING TRANSMISSION", render.ColorWhite, render.ColorBlack)
+	kindLabel := game.EncounterKindLabel(enc.Kind)
+	shipLine := fmt.Sprintf("%s \"%s\"", kindLabel, enc.ShipName)
+	// Use a shorter display: just the full Name from the SpaceObject
+	shipLine = enc.ShipName
+	clr := uint8(render.ColorLightGray)
+	switch enc.Kind {
+	case game.EncounterTrader:
+		clr = render.ColorLightGreen
+	case game.EncounterPatrol:
+		clr = render.ColorLightBlue
+	case game.EncounterPirate:
+		clr = render.ColorLightRed
+	}
+	buf.WriteString(cx+1, 4, shipLine, clr, render.ColorBlack)
+	buf.WriteString(cx, 5, "-----------------------------------------", render.ColorCyan, render.ColorBlack)
+
+	// Greeting
+	buf.WriteString(cx+1, 7, fmt.Sprintf("\"%s\"", enc.Greeting), render.ColorWhite, render.ColorBlack)
+	buf.WriteString(cx, 8, "=========================================", render.ColorCyan, render.ColorBlack)
+
+	// Options
+	row := 10
+	for i, opt := range enc.Options {
+		label := fmt.Sprintf(" %d. %s", i+1, opt.Label)
+		optClr := uint8(render.ColorLightGray)
+		if !opt.Enabled {
+			optClr = render.ColorDarkGray
+			label += " [" + opt.DisableText + "]"
+		}
+		if enc.Resolved {
+			optClr = render.ColorDarkGray // dim all options after resolution
+		}
+		buf.WriteString(cx, row, label, optClr, render.ColorBlack)
+		row++
+	}
+
+	// Result text (after resolution)
+	if enc.ResultText != "" {
+		row++
+		buf.WriteString(cx, row, "-----------------------------------------", render.ColorCyan, render.ColorBlack)
+		row++
+		// Handle multi-line result text
+		line := ""
+		for _, ch := range enc.ResultText {
+			if ch == '\n' {
+				buf.WriteString(cx+1, row, line, render.ColorWhite, render.ColorBlack)
+				row++
+				line = ""
+			} else {
+				line += string(ch)
+			}
+		}
+		if line != "" {
+			buf.WriteString(cx+1, row, line, render.ColorWhite, render.ColorBlack)
+			row++
+		}
+		buf.WriteString(cx, row, "-----------------------------------------", render.ColorCyan, render.ColorBlack)
+	}
+
+	// Comms log
+	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	msgs := g.sim.Log.Recent(commsMax)
+	for i, msg := range msgs {
+		msgClr := msgColor(msg.Priority)
+		buf.WriteString(2, commsRow+1+i, msg.Text, msgClr, render.ColorBlack)
+	}
+
+	if enc.Resolved {
+		buf.WriteString(2, gridRows-1, "ESC: End transmission", render.ColorDarkGray, render.ColorBlack)
+	} else {
+		buf.WriteString(2, gridRows-1, "1-9: Choose option  ESC: End transmission", render.ColorDarkGray, render.ColorBlack)
+	}
+}
+
+func (g *Game) updateEncounter() error {
+	enc := g.sim.ActiveEncounter
+
+	// ESC ends the encounter
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.sim.EndEncounter()
+		g.viewMode = g.prevViewMode
+		g.drawScreen()
+		return nil
+	}
+
+	if enc != nil && !enc.Resolved {
+		// Check digit key presses for option selection
+		for i := range enc.Options {
+			if pressedDigit(i + 1) {
+				opt := enc.Options[i]
+				if !opt.Enabled {
+					g.sim.Log.Add(opt.DisableText, game.MsgWarning)
+					break
+				}
+				result := g.sim.ResolveEncounterOption(i)
+				if result == "TRADE" {
+					// Special case: trader wants to trade — open station trade
+					// For now, just log it since we need a proper trade interface
+					enc.ResultText = "The trader opens a trade channel.\n(Space trading not yet available outside stations.)"
+					enc.Resolved = true
+				} else {
+					enc.ResultText = result
+				}
+				break
+			}
 		}
 	}
 

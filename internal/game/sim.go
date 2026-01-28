@@ -43,12 +43,17 @@ type Sim struct {
 	Skills    PlayerSkills
 	Discovery *DiscoveryLog
 
+	// Encounter state
+	PendingHail     *HailState
+	ActiveEncounter *EncounterState
+
 	// UI signals (set by Interact, cleared by Game after handling)
 	NavActivated    bool
 	PilotActivated  bool
 	DockActivated   bool // set when player docks at a station
 	CargoActivated  bool // set when player uses cargo console
 	ScanActivated   bool // set when player uses science console
+	CommsActivated  bool // set when player uses viewscreen with pending hail
 
 	player ecs.Entity
 	posMap *ecs.Map[Position]
@@ -124,6 +129,7 @@ func (s *Sim) Tick() {
 	s.tickNeeds()
 	s.tickSystemMapNPCs()
 	s.tickSystemMapShuttle()
+	s.tickHails()
 	if s.Ticks%warningInterval == 0 {
 		s.checkWarnings()
 	}
@@ -405,8 +411,13 @@ func (s *Sim) Interact() {
 		s.Skills.AddXP(SkillEngineering, 0.5)
 
 	case world.EquipViewscreen:
-		star := s.Sector.Systems[s.Sector.CurrentSystem]
-		s.Log.Add(fmt.Sprintf("Viewscreen: %s system. %s.", star.Name, StarTypeName(star.Type)), MsgInfo)
+		if s.PendingHail != nil {
+			s.CommsActivated = true
+			s.Log.Add(fmt.Sprintf("Answering hail from %s.", s.PendingHail.Ship.Name), MsgInfo)
+		} else {
+			star := s.Sector.Systems[s.Sector.CurrentSystem]
+			s.Log.Add(fmt.Sprintf("Viewscreen: %s system. %s. No incoming transmissions.", star.Name, StarTypeName(star.Type)), MsgInfo)
+		}
 
 	case world.EquipCargoConsole:
 		s.CargoActivated = true
@@ -675,4 +686,90 @@ func (s *Sim) OnStationDocked(sysIdx int) {
 	if s.Skills.AddXP(SkillDiplomacy, 3.0) {
 		LogLevelUp(s.Log, SkillDiplomacy, s.Skills.Level(SkillDiplomacy))
 	}
+}
+
+// tickHails checks for NPC ships near the shuttle that haven't hailed yet.
+func (s *Sim) tickHails() {
+	// Don't check if we already have a pending hail or active encounter
+	if s.PendingHail != nil || s.ActiveEncounter != nil {
+		// Countdown existing hail
+		if s.PendingHail != nil {
+			s.PendingHail.TicksLeft--
+			if s.PendingHail.TicksLeft <= 0 {
+				s.handleHailExpiry()
+			}
+		}
+		return
+	}
+
+	// Only check every 60 ticks to save cycles
+	if s.Ticks%60 != 0 {
+		return
+	}
+
+	sm := s.Sector.Systems[s.Sector.CurrentSystem].Map
+	if sm == nil {
+		return
+	}
+
+	sx := sm.Shuttle.TileX()
+	sy := sm.Shuttle.TileY()
+
+	for i := range sm.Objects {
+		obj := &sm.Objects[i]
+		if obj.Kind != ObjShip || obj.Hailed {
+			continue
+		}
+		dx := obj.X - sx
+		dy := obj.Y - sy
+		if dx*dx+dy*dy <= 64 { // within 8 tiles
+			obj.Hailed = true
+			s.PendingHail = &HailState{
+				Ship:      obj,
+				TicksLeft: hailTimeout,
+			}
+			s.Log.Add(fmt.Sprintf(">>> INCOMING HAIL from %s <<<", obj.Name), MsgDiscovery)
+			return
+		}
+	}
+}
+
+// handleHailExpiry handles when a hail times out.
+func (s *Sim) handleHailExpiry() {
+	ship := s.PendingHail.Ship
+	s.PendingHail = nil
+
+	switch ship.AIKind {
+	case AIPirate:
+		// Pirates get aggressive when ignored
+		ship.MoveRate = max(ship.MoveRate-2, 3)
+		ship.dirTimer = 30
+		s.Log.Add(fmt.Sprintf("%s: No response. The pirate turns hostile!", ship.Name), MsgCritical)
+	case AIPatrol:
+		s.Log.Add(fmt.Sprintf("%s: Hail expired. Patrol logs you as suspicious.", ship.Name), MsgWarning)
+	default:
+		s.Log.Add(fmt.Sprintf("%s: Hail expired. The vessel moves on.", ship.Name), MsgInfo)
+	}
+}
+
+// StartEncounter creates an encounter from the current pending hail.
+func (s *Sim) StartEncounter() {
+	if s.PendingHail == nil {
+		return
+	}
+	s.ActiveEncounter = NewEncounter(s.PendingHail.Ship, s.Sector.Seed, &s.Skills)
+	s.PendingHail = nil
+}
+
+// ResolveEncounterOption processes the player's choice in an active encounter.
+func (s *Sim) ResolveEncounterOption(optionIdx int) string {
+	if s.ActiveEncounter == nil {
+		return ""
+	}
+	return ResolveEncounter(s, s.ActiveEncounter, optionIdx)
+}
+
+// EndEncounter clears the active encounter.
+func (s *Sim) EndEncounter() {
+	s.ActiveEncounter = nil
 }
