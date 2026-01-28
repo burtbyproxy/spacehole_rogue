@@ -39,11 +39,16 @@ type Sim struct {
 	GeneratorOn bool
 	RecyclerOn  bool
 
+	// Skills and discovery
+	Skills    PlayerSkills
+	Discovery *DiscoveryLog
+
 	// UI signals (set by Interact, cleared by Game after handling)
-	NavActivated   bool
-	PilotActivated bool
-	DockActivated  bool // set when player docks at a station
-	CargoActivated bool // set when player uses cargo console
+	NavActivated    bool
+	PilotActivated  bool
+	DockActivated   bool // set when player docks at a station
+	CargoActivated  bool // set when player uses cargo console
+	ScanActivated   bool // set when player uses science console
 
 	player ecs.Entity
 	posMap *ecs.Map[Position]
@@ -66,19 +71,28 @@ func NewSim(layout *world.ShipLayout) *Sim {
 	log.Add("All systems online. Generator, recycler running.", MsgInfo)
 	log.Add("You should probably find the toilet.", MsgWarning)
 
+	sector := NewSector(42)
+	disc := NewDiscoveryLog()
+	// Mark starting system and star type as discovered
+	disc.SystemsVisited[0] = true
+	disc.TotalSystemsVisited = 1
+	disc.StarTypesSeen[int(sector.Systems[0].Type)] = true
+	disc.TotalStarTypesSeen = 1
+
 	return &Sim{
-		ECS:             w,
-		Grid:            grid,
-		Layout:          layout,
-		Resources:       NewShuttleResources(),
-		Needs:           PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20},
-		Log:             log,
-		Sector:          NewSector(42),
+		ECS:         w,
+		Grid:        grid,
+		Layout:      layout,
+		Resources:   NewShuttleResources(),
+		Needs:       PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20},
+		Log:         log,
+		Sector:      sector,
+		Discovery:   disc,
 		EngineOn:    true,
 		GeneratorOn: true,
 		RecyclerOn:  true,
-		player:          player,
-		posMap:          posMap,
+		player:      player,
+		posMap:      posMap,
 	}
 }
 
@@ -276,6 +290,9 @@ func (s *Sim) Interact() {
 		r.BodyOrganic += 5
 		s.Needs.Hunger = max(s.Needs.Hunger-35, 0)
 		s.Log.Add("Dispensed a meal. Tastes like... Tuesday.", MsgInfo)
+		if s.Skills.AddXP(SkillSurvival, 2.0) {
+			LogLevelUp(s.Log, SkillSurvival, s.Skills.Level(SkillSurvival))
+		}
 
 	case world.EquipDrinkStation:
 		// Drink: clean water leaves ship → enters body, thirst drops
@@ -291,6 +308,9 @@ func (s *Sim) Interact() {
 		r.BodyWater += 3
 		s.Needs.Thirst = max(s.Needs.Thirst-25, 0)
 		s.Log.Add(fmt.Sprintf("Gulped some recycled water. %dc remaining.", r.Water.Clean), MsgInfo)
+		if s.Skills.AddXP(SkillSurvival, 1.5) {
+			LogLevelUp(s.Log, SkillSurvival, s.Skills.Level(SkillSurvival))
+		}
 
 	case world.EquipToilet:
 		// Flush: waste from body → dirty matter back to ship pools
@@ -305,6 +325,9 @@ func (s *Sim) Interact() {
 		r.Water.Dirty += r.WasteWater
 		r.WasteOrganic = 0
 		r.WasteWater = 0
+		if s.Skills.AddXP(SkillSurvival, 0.5) {
+			LogLevelUp(s.Log, SkillSurvival, s.Skills.Level(SkillSurvival))
+		}
 
 	case world.EquipShower:
 		// Uses clean water → dirty water (external, doesn't go through body)
@@ -316,6 +339,9 @@ func (s *Sim) Interact() {
 		r.Water.Dirty += 3
 		s.Needs.Hygiene = max(s.Needs.Hygiene-40, 0)
 		s.Log.Add("Quick shower. Refreshing.", MsgInfo)
+		if s.Skills.AddXP(SkillSurvival, 0.5) {
+			LogLevelUp(s.Log, SkillSurvival, s.Skills.Level(SkillSurvival))
+		}
 
 	case world.EquipBed:
 		s.Log.Add("You rest briefly. The void doesn't care.", MsgSocial)
@@ -332,7 +358,8 @@ func (s *Sim) Interact() {
 		s.Log.Add("Pilot station. Launching system view.", MsgInfo)
 
 	case world.EquipScienceConsole:
-		s.Log.Add("Science station. Deborah usually sits here. She has no idea what she's doing.", MsgSocial)
+		s.ScanActivated = true
+		s.Log.Add("Science station active. Deborah left her notes. They're just hoof prints.", MsgSocial)
 
 	case world.EquipIncinerator:
 		s.Log.Add("Incinerator. Not yet operational.", MsgInfo)
@@ -346,6 +373,7 @@ func (s *Sim) Interact() {
 			status = "ON"
 		}
 		s.Log.Add(fmt.Sprintf("Engine [%s]. Provides thrust.", status), MsgInfo)
+		s.Skills.AddXP(SkillEngineering, 0.5)
 
 	case world.EquipGenerator:
 		status := "OFF"
@@ -353,6 +381,7 @@ func (s *Sim) Interact() {
 			status = "ON"
 		}
 		s.Log.Add(fmt.Sprintf("Generator [%s]. Produces 1 energy/sec.", status), MsgInfo)
+		s.Skills.AddXP(SkillEngineering, 0.5)
 
 	case world.EquipPowerCell:
 		s.Log.Add(fmt.Sprintf("Power cell: %d / %d.", r.Energy, r.MaxEnergy), MsgInfo)
@@ -373,6 +402,7 @@ func (s *Sim) Interact() {
 		rc := &r.Recycler
 		s.Log.Add(fmt.Sprintf("Recycler [%s]. Buffer: %dw %do / %d cap.",
 			status, rc.WaterBuffer, rc.OrganicBuffer, rc.Capacity), MsgInfo)
+		s.Skills.AddXP(SkillEngineering, 0.5)
 
 	case world.EquipViewscreen:
 		star := s.Sector.Systems[s.Sector.CurrentSystem]
@@ -403,6 +433,9 @@ func (s *Sim) ToggleEquipment() {
 		} else {
 			s.Log.Add("Engine shut down.", MsgWarning)
 		}
+		if s.Skills.AddXP(SkillEngineering, 3.0) {
+			LogLevelUp(s.Log, SkillEngineering, s.Skills.Level(SkillEngineering))
+		}
 
 	case world.EquipGenerator:
 		s.GeneratorOn = !s.GeneratorOn
@@ -411,6 +444,9 @@ func (s *Sim) ToggleEquipment() {
 		} else {
 			s.Log.Add("Generator offline. No power generation.", MsgWarning)
 		}
+		if s.Skills.AddXP(SkillEngineering, 3.0) {
+			LogLevelUp(s.Log, SkillEngineering, s.Skills.Level(SkillEngineering))
+		}
 
 	case world.EquipMatterRecycler:
 		s.RecyclerOn = !s.RecyclerOn
@@ -418,6 +454,9 @@ func (s *Sim) ToggleEquipment() {
 			s.Log.Add("Recycler online. Processing dirty matter.", MsgInfo)
 		} else {
 			s.Log.Add("Recycler offline. Saving power.", MsgInfo)
+		}
+		if s.Skills.AddXP(SkillEngineering, 3.0) {
+			LogLevelUp(s.Log, SkillEngineering, s.Skills.Level(SkillEngineering))
 		}
 
 	default:
@@ -435,6 +474,7 @@ func (s *Sim) DockAtStation() *StationData {
 	}
 	DockRefill(&s.Resources)
 	s.Log.Add(fmt.Sprintf("Docked at %s. Tanks topped off, energy full.", sd.Name), MsgInfo)
+	s.OnStationDocked(s.Sector.CurrentSystem)
 	return sd
 }
 
@@ -485,6 +525,9 @@ func (s *Sim) BuyCargo(sd *StationData, kind CargoKind) bool {
 	s.Resources.Credits -= price
 	sd.Stock[kind]--
 	s.Log.Add(fmt.Sprintf("Bought %s for %dcr.", CargoName(kind), price), MsgInfo)
+	if s.Skills.AddXP(SkillDiplomacy, 2.0) {
+		LogLevelUp(s.Log, SkillDiplomacy, s.Skills.Level(SkillDiplomacy))
+	}
 	return true
 }
 
@@ -511,6 +554,9 @@ func (s *Sim) SellCargo(sd *StationData, padIdx int) bool {
 		pad.Kind = CargoNone
 	}
 	s.Log.Add(fmt.Sprintf("Sold %s for %dcr.", name, price), MsgInfo)
+	if s.Skills.AddXP(SkillDiplomacy, 2.0) {
+		LogLevelUp(s.Log, SkillDiplomacy, s.Skills.Level(SkillDiplomacy))
+	}
 	return true
 }
 
@@ -546,5 +592,87 @@ func (s *Sim) NavigateTo(targetIdx int) bool {
 	s.Sector.EnsureSystemMap(targetIdx)
 	star := s.Sector.Systems[targetIdx]
 	s.Log.Add(fmt.Sprintf("Arrived at %s. %s. Energy: -%d.", star.Name, StarTypeName(star.Type), cost), MsgDiscovery)
+	if s.Skills.AddXP(SkillPiloting, 5.0) {
+		LogLevelUp(s.Log, SkillPiloting, s.Skills.Level(SkillPiloting))
+	}
+	s.OnSystemVisited(targetIdx)
 	return true
+}
+
+// OnSystemVisited handles first-visit discovery bonuses for a star system.
+func (s *Sim) OnSystemVisited(sysIdx int) {
+	star := s.Sector.Systems[sysIdx]
+
+	// First time visiting this specific system?
+	if !s.Discovery.SystemsVisited[sysIdx] {
+		s.Discovery.SystemsVisited[sysIdx] = true
+		s.Discovery.TotalSystemsVisited++
+		s.Resources.Credits += 10
+		s.Log.Add(fmt.Sprintf("New system discovered: %s! +10cr.", star.Name), MsgDiscovery)
+		if s.Skills.AddXP(SkillPiloting, 8.0) {
+			LogLevelUp(s.Log, SkillPiloting, s.Skills.Level(SkillPiloting))
+		}
+	}
+
+	// First time seeing this star type?
+	if !s.Discovery.StarTypesSeen[int(star.Type)] {
+		s.Discovery.StarTypesSeen[int(star.Type)] = true
+		s.Discovery.TotalStarTypesSeen++
+		s.Resources.Credits += 25
+		s.Log.Add(fmt.Sprintf("New star type logged: %s! +25cr.", StarTypeName(star.Type)), MsgDiscovery)
+		if s.Skills.AddXP(SkillScience, 15.0) {
+			LogLevelUp(s.Log, SkillScience, s.Skills.Level(SkillScience))
+		}
+	}
+}
+
+// ScanPlanet scans a planet in the current system map.
+func (s *Sim) ScanPlanet(objIdx int) {
+	sm := s.Sector.CurrentSystemMap()
+	obj := &sm.Objects[objIdx]
+	sysIdx := s.Sector.CurrentSystem
+	key := ScanKey(sysIdx, objIdx)
+
+	if _, already := s.Discovery.PlanetsScanned[key]; already {
+		s.Log.Add(fmt.Sprintf("Re-scanning %s. No new data.", obj.Name), MsgInfo)
+		s.Skills.AddXP(SkillScience, 1.0)
+		return
+	}
+
+	systemName := s.Sector.Systems[sysIdx].Name
+	scanData := GenerateScanData(s.Sector.Seed, sysIdx, objIdx, obj, systemName)
+	s.Discovery.PlanetsScanned[key] = scanData
+	s.Discovery.TotalScans++
+
+	// Keep recent scans list (newest first, max 10)
+	s.Discovery.RecentScans = append([]PlanetScanData{scanData}, s.Discovery.RecentScans...)
+	if len(s.Discovery.RecentScans) > 10 {
+		s.Discovery.RecentScans = s.Discovery.RecentScans[:10]
+	}
+
+	s.Resources.Credits += 15
+	s.Log.Add(fmt.Sprintf("Scanned %s (%s). %s. +15cr.",
+		obj.Name, PlanetKindName(obj.PlanetType), scanData.Resources), MsgDiscovery)
+	if scanData.Hazard != "" {
+		s.Log.Add(fmt.Sprintf("Hazard: %s", scanData.Hazard), MsgWarning)
+	}
+	if scanData.POI != "" {
+		s.Log.Add(fmt.Sprintf("POI: %s", scanData.POI), MsgDiscovery)
+	}
+	if s.Skills.AddXP(SkillScience, 8.0) {
+		LogLevelUp(s.Log, SkillScience, s.Skills.Level(SkillScience))
+	}
+}
+
+// OnStationDocked handles first-dock discovery bonuses.
+func (s *Sim) OnStationDocked(sysIdx int) {
+	if !s.Discovery.StationsDocked[sysIdx] {
+		s.Discovery.StationsDocked[sysIdx] = true
+		s.Discovery.TotalStationsDocked++
+		s.Resources.Credits += 10
+		s.Log.Add("First dock at this station! +10cr.", MsgDiscovery)
+	}
+	if s.Skills.AddXP(SkillDiplomacy, 3.0) {
+		LogLevelUp(s.Log, SkillDiplomacy, s.Skills.Level(SkillDiplomacy))
+	}
 }

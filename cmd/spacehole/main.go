@@ -44,6 +44,7 @@ const (
 	ViewSystemMap
 	ViewStation
 	ViewCargo
+	ViewCharSheet
 )
 
 // Station submenu states.
@@ -74,6 +75,9 @@ type Game struct {
 	sim      *game.Sim
 	viewMode ViewMode
 	sprites  []floatingSprite // sub-tile sprites drawn on top of CellBuffer
+
+	// Character sheet
+	prevViewMode ViewMode // view to return to from char sheet
 
 	// Station docking state
 	stationMenu int               // current station submenu (stMenu* constants)
@@ -131,6 +135,8 @@ func (g *Game) drawScreen() {
 		g.drawStationView()
 	case ViewCargo:
 		g.drawCargoView()
+	case ViewCharSheet:
+		g.drawCharSheetView()
 	default:
 		g.drawShipView()
 	}
@@ -235,7 +241,7 @@ func (g *Game) drawShipView() {
 	}
 
 	// Instructions
-	buf.WriteString(2, gridRows-1, "WASD: Move  E: Interact  T: Toggle  ESC: Quit", render.ColorDarkGray, render.ColorBlack)
+	buf.WriteString(2, gridRows-1, "WASD: Move  E: Interact  T: Toggle  Tab: Status  ESC: Quit", render.ColorDarkGray, render.ColorBlack)
 }
 
 func (g *Game) drawSectorMapView() {
@@ -483,6 +489,18 @@ func (g *Game) drawSystemMapView() {
 			buf.WriteString(infoX, row, "Star - don't fly into it", render.ColorYellow, render.ColorBlack)
 		case game.ObjPlanet:
 			buf.WriteString(infoX, row, game.PlanetKindName(nearObj.PlanetType), render.ColorLightGray, render.ColorBlack)
+			row++
+			objIdx := g.findObjectIndex(sm, nearObj)
+			if objIdx >= 0 {
+				key := game.ScanKey(g.sim.Sector.CurrentSystem, objIdx)
+				if scan, ok := g.sim.Discovery.PlanetsScanned[key]; ok {
+					buf.WriteString(infoX, row, "SCANNED", render.ColorLightGreen, render.ColorBlack)
+					row++
+					buf.WriteString(infoX, row, scan.Resources, render.ColorLightGray, render.ColorBlack)
+				} else {
+					buf.WriteString(infoX, row, "Unscanned - press E", render.ColorYellow, render.ColorBlack)
+				}
+			}
 		case game.ObjStation:
 			buf.WriteString(infoX, row, "Station - press E to dock", render.ColorCyan, render.ColorBlack)
 		case game.ObjDerelict:
@@ -542,7 +560,7 @@ func (g *Game) drawSystemMapView() {
 	}
 
 	// Instructions
-	buf.WriteString(2, gridRows-1, "WASD: Fly  E: Interact  N: Nav Map  ESC: Ship Interior", render.ColorDarkGray, render.ColorBlack)
+	buf.WriteString(2, gridRows-1, "WASD: Fly  E: Interact/Scan  N: Nav  Tab: Status  ESC: Ship", render.ColorDarkGray, render.ColorBlack)
 }
 
 // drawRadar renders a shuttle-centered minimap of the star system.
@@ -868,6 +886,8 @@ func (g *Game) Update() error {
 		return g.updateStation()
 	case ViewCargo:
 		return g.updateCargo()
+	case ViewCharSheet:
+		return g.updateCharSheet()
 	default:
 		return g.updateShip()
 	}
@@ -922,6 +942,19 @@ func (g *Game) updateShip() error {
 	if g.sim.CargoActivated {
 		g.sim.CargoActivated = false
 		g.viewMode = ViewCargo
+	}
+
+	// Science console → character sheet
+	if g.sim.ScanActivated {
+		g.sim.ScanActivated = false
+		g.prevViewMode = ViewShip
+		g.viewMode = ViewCharSheet
+	}
+
+	// Tab → character sheet
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
+		g.prevViewMode = ViewShip
+		g.viewMode = ViewCharSheet
 	}
 
 	// Redraw
@@ -1003,6 +1036,13 @@ func (g *Game) updateSystemMap() error {
 		return nil
 	}
 
+	// Tab → character sheet
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
+		g.prevViewMode = ViewSystemMap
+		g.viewMode = ViewCharSheet
+		return nil
+	}
+
 	// Thrust-based WASD flight (physics handles acceleration, drag, speed cap)
 	{
 		dx, dy := 0, 0
@@ -1021,15 +1061,17 @@ func (g *Game) updateSystemMap() error {
 		if dx != 0 || dy != 0 {
 			sm := g.sim.Sector.CurrentSystemMap()
 			sm.Shuttle.ApplyThrust(dx, dy)
+			g.sim.Skills.AddXP(game.SkillPiloting, 0.1)
 		}
 	}
 
-	// E near object → approach interaction or dock
+	// E near object → approach interaction, dock, or scan
 	if inpututil.IsKeyJustPressed(ebiten.KeyE) {
 		sm := g.sim.Sector.CurrentSystemMap()
 		obj := sm.NearestObject(sm.Shuttle.TileX(), sm.Shuttle.TileY(), 3)
 		if obj != nil {
-			if obj.Kind == game.ObjStation {
+			switch obj.Kind {
+			case game.ObjStation:
 				// Dock at station
 				sd := g.sim.DockAtStation()
 				if sd != nil {
@@ -1037,7 +1079,13 @@ func (g *Game) updateSystemMap() error {
 					g.stationMenu = stMenuMain
 					g.viewMode = ViewStation
 				}
-			} else {
+			case game.ObjPlanet:
+				// Scan planet
+				objIdx := g.findObjectIndex(sm, obj)
+				if objIdx >= 0 {
+					g.sim.ScanPlanet(objIdx)
+				}
+			default:
 				g.logApproachInfo(obj)
 			}
 		} else {
@@ -1344,6 +1392,7 @@ func (g *Game) updateStationMain() {
 		g.stationMenu = stMenuTrade
 	} else if pressedDigit(3) {
 		g.stationMenu = stMenuBar
+		g.sim.Skills.AddXP(game.SkillDiplomacy, 1.0)
 	} else if pressedDigit(4) {
 		g.stationMenu = stMenuFaction
 	} else if pressedDigit(5) {
@@ -1495,6 +1544,187 @@ func (g *Game) updateCargo() error {
 	g.buffer.WriteString(gridCols-20, gridRows-1, fps, render.ColorDarkGray, render.ColorBlack)
 
 	return nil
+}
+
+// --- Character Sheet view ---
+
+func (g *Game) drawCharSheetView() {
+	buf := g.buffer
+	buf.Clear()
+
+	cx := 2
+	skills := &g.sim.Skills
+	disc := g.sim.Discovery
+	r := &g.sim.Resources
+
+	// Title
+	buf.WriteString(cx, 0, "--- CHARACTER SHEET ---", render.ColorLightCyan, render.ColorBlack)
+	buf.WriteString(gridCols-16, 0, "Tab/ESC: Back", render.ColorDarkGray, render.ColorBlack)
+
+	// Banner
+	buf.WriteString(cx, 2, "=========================================", render.ColorCyan, render.ColorBlack)
+	buf.WriteString(cx+1, 3, "COMMANDER'S LOG", render.ColorWhite, render.ColorBlack)
+	buf.WriteString(cx+30, 3, fmt.Sprintf("Credits: %d", r.Credits), render.ColorYellow, render.ColorBlack)
+	buf.WriteString(cx, 4, "=========================================", render.ColorCyan, render.ColorBlack)
+
+	// Skills section
+	buf.WriteString(cx, 6, "--- Skills ---", render.ColorLightCyan, render.ColorBlack)
+	for i := game.SkillID(0); i < game.SkillCount; i++ {
+		row := 7 + int(i)
+		lvl := skills.Level(i)
+		cur, needed := skills.XPProgress(i)
+		g.drawSkillBar(buf, cx+1, row, game.SkillName(i), lvl, cur, needed)
+	}
+
+	// Discovery section (left panel)
+	dRow := 15
+	buf.WriteString(cx, dRow, "--- Discovery ---", render.ColorLightCyan, render.ColorBlack)
+	dRow++
+
+	// Star types with colored indicators
+	starLine := fmt.Sprintf(" Star Types:  %d/5  ", disc.TotalStarTypesSeen)
+	buf.WriteString(cx, dRow, starLine, render.ColorLightGray, render.ColorBlack)
+	starLabels := []string{"Y", "R", "B", "W", "O"}
+	starColors := []uint8{render.ColorYellow, render.ColorLightRed, render.ColorLightBlue, render.ColorWhite, render.ColorBrown}
+	offset := cx + len(starLine)
+	for j := 0; j < 5; j++ {
+		if disc.StarTypesSeen[j] {
+			buf.WriteString(offset, dRow, "["+starLabels[j]+"]", starColors[j], render.ColorBlack)
+		} else {
+			buf.WriteString(offset, dRow, "[ ]", render.ColorDarkGray, render.ColorBlack)
+		}
+		offset += 4
+	}
+	dRow++
+
+	totalSystems := len(g.sim.Sector.Systems)
+	buf.WriteString(cx, dRow, fmt.Sprintf(" Systems:     %d/%d explored",
+		disc.TotalSystemsVisited, totalSystems), render.ColorLightGray, render.ColorBlack)
+	dRow++
+	buf.WriteString(cx, dRow, fmt.Sprintf(" Planets:     %d scanned", disc.TotalScans), render.ColorLightGray, render.ColorBlack)
+	dRow++
+	buf.WriteString(cx, dRow, fmt.Sprintf(" Stations:    %d docked", disc.TotalStationsDocked), render.ColorLightGray, render.ColorBlack)
+	dRow++
+
+	// Perks (right panel)
+	perkX := 44
+	buf.WriteString(perkX, 6, "--- Perks ---", render.ColorLightCyan, render.ColorBlack)
+	perkRow := 7
+	for i := game.SkillID(0); i < game.SkillCount; i++ {
+		lvl := skills.Level(i)
+		if lvl >= 2 {
+			perk := game.SkillPerk(i, lvl)
+			label := fmt.Sprintf("%s %d:", game.SkillName(i), lvl)
+			buf.WriteString(perkX, perkRow, label, render.ColorWhite, render.ColorBlack)
+			perkRow++
+			buf.WriteString(perkX+1, perkRow, perk, render.ColorLightGray, render.ColorBlack)
+			perkRow++
+		}
+	}
+	if perkRow == 7 {
+		buf.WriteString(perkX, perkRow, "Level up skills to unlock perks!", render.ColorDarkGray, render.ColorBlack)
+	}
+
+	// Recent scans
+	dRow++
+	buf.WriteString(cx, dRow, "--- Recent Scans ---", render.ColorLightCyan, render.ColorBlack)
+	dRow++
+	if len(disc.RecentScans) == 0 {
+		buf.WriteString(cx+1, dRow, "No planets scanned yet.", render.ColorDarkGray, render.ColorBlack)
+	} else {
+		// Show up to 3 recent scans
+		limit := 3
+		if len(disc.RecentScans) < limit {
+			limit = len(disc.RecentScans)
+		}
+		for i := 0; i < limit; i++ {
+			scan := disc.RecentScans[i]
+			buf.WriteString(cx+1, dRow, fmt.Sprintf("%s (%s)", scan.Name, game.PlanetKindName(scan.PlanetType)),
+				render.ColorWhite, render.ColorBlack)
+			dRow++
+			buf.WriteString(cx+2, dRow, scan.Resources, render.ColorLightGray, render.ColorBlack)
+			dRow++
+			if scan.POI != "" {
+				buf.WriteString(cx+2, dRow, "POI: "+scan.POI, render.ColorLightGreen, render.ColorBlack)
+				dRow++
+			}
+		}
+	}
+
+	// Comms log
+	buf.WriteString(2, commsRow, "--- Comms ---", render.ColorLightCyan, render.ColorBlack)
+	msgs := g.sim.Log.Recent(commsMax)
+	for i, msg := range msgs {
+		clr := msgColor(msg.Priority)
+		buf.WriteString(2, commsRow+1+i, msg.Text, clr, render.ColorBlack)
+	}
+
+	buf.WriteString(2, gridRows-1, "Tab/ESC: Back", render.ColorDarkGray, render.ColorBlack)
+}
+
+func (g *Game) drawSkillBar(buf *render.CellBuffer, x, y int, name string, level int, curXP, neededXP float64) {
+	barW := 10
+	filled := 0
+	if neededXP > 0 {
+		filled = int(float64(barW) * curXP / neededXP)
+		if filled > barW {
+			filled = barW
+		}
+	}
+	if level >= 10 {
+		filled = barW
+	}
+
+	// Skill name (padded to 12 chars)
+	label := fmt.Sprintf("%-12s", name)
+	clr := uint8(render.ColorLightGray)
+	if level >= 5 {
+		clr = render.ColorLightGreen
+	}
+	buf.WriteString(x, y, label, clr, render.ColorBlack)
+
+	// Bar
+	buf.Set(x+13, y, '[', render.ColorDarkGray, render.ColorBlack)
+	for i := 0; i < barW; i++ {
+		if i < filled {
+			buf.Set(x+14+i, y, '#', clr, render.ColorBlack)
+		} else {
+			buf.Set(x+14+i, y, '.', render.ColorDarkGray, render.ColorBlack)
+		}
+	}
+	buf.Set(x+14+barW, y, ']', render.ColorDarkGray, render.ColorBlack)
+
+	// Level and XP
+	if level >= 10 {
+		buf.WriteString(x+26, y, "Lv 10 MAX", render.ColorYellow, render.ColorBlack)
+	} else {
+		info := fmt.Sprintf("Lv %d  (%.0f/%.0f)", level, curXP, neededXP)
+		buf.WriteString(x+26, y, info, render.ColorDarkGray, render.ColorBlack)
+	}
+}
+
+func (g *Game) updateCharSheet() error {
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) || inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.viewMode = g.prevViewMode
+		g.drawScreen()
+		return nil
+	}
+
+	g.drawScreen()
+
+	fps := fmt.Sprintf("FPS: %.0f  TPS: %.0f", ebiten.ActualFPS(), ebiten.ActualTPS())
+	g.buffer.WriteString(gridCols-20, gridRows-1, fps, render.ColorDarkGray, render.ColorBlack)
+	return nil
+}
+
+// findObjectIndex returns the index of a SpaceObject in the system map's Objects slice.
+func (g *Game) findObjectIndex(sm *game.SystemMap, target *game.SpaceObject) int {
+	for i := range sm.Objects {
+		if &sm.Objects[i] == target {
+			return i
+		}
+	}
+	return -1
 }
 
 // updateHoverInfo shows a description of whatever the mouse is hovering over.
