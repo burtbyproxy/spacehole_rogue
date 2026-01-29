@@ -13,7 +13,8 @@ const (
 // Each instance has its own state that can be upgraded or degraded.
 type Equipment struct {
 	Kind EquipmentKind
-	On   bool // is it powered on?
+	On   bool // is it powered on? (for doors: auto-open mode)
+	Open bool // for doors: currently open or closed
 
 	// Power characteristics (can be modified by upgrades/damage)
 	PowerMode PowerMode
@@ -40,6 +41,8 @@ type EquipmentTemplate struct {
 var EquipmentTemplates = map[EquipmentKind]EquipmentTemplate{
 	// --- No power required ---
 	EquipNone:       {EquipNone, PowerNone, 0, 1.0},
+	EquipDoor:       {EquipDoor, PowerNone, 0, 1.0},    // doors have no power cost
+	EquipAirlock:    {EquipAirlock, PowerNone, 0, 1.0}, // airlock (exit/entry)
 	EquipBed:        {EquipBed, PowerNone, 0, 1.0},
 	EquipLocker:     {EquipLocker, PowerNone, 0, 1.0},
 	EquipCargoTile:  {EquipCargoTile, PowerNone, 0, 1.0},
@@ -49,17 +52,20 @@ var EquipmentTemplates = map[EquipmentKind]EquipmentTemplate{
 	EquipPowerCell:   {EquipPowerCell, PowerNone, 0, 1.0},
 
 	// --- Constant draw (reserves power while ON) ---
-	EquipEngine:           {EquipEngine, PowerConstant, 5, 1.0},
+	EquipEngine:           {EquipEngine, PowerConstant, 10, 1.0},
 	EquipGenerator:        {EquipGenerator, PowerConstant, 10, 1.0}, // needs 10 to run, produces 1/sec
-	EquipMatterRecycler:   {EquipMatterRecycler, PowerConstant, 3, 1.0},
-	EquipCargoTransporter: {EquipCargoTransporter, PowerConstant, 3, 1.0},
+	EquipMatterRecycler:   {EquipMatterRecycler, PowerConstant, 10, 1.0},
+	EquipCargoTransporter: {EquipCargoTransporter, PowerConstant, 10, 1.0},
+	// Bridge stations - need to be ON to use
+	EquipNavConsole:     {EquipNavConsole, PowerConstant, 5, 1.0},
+	EquipPilotConsole:   {EquipPilotConsole, PowerConstant, 5, 1.0},
+	EquipScienceConsole: {EquipScienceConsole, PowerConstant, 5, 1.0},
+
+	// --- Constant draw (reserves power while ON) ---
+	EquipCargoConsole: {EquipCargoConsole, PowerConstant, 5, 1.0},
 
 	// --- On-use (per interaction) ---
-	EquipViewscreen:     {EquipViewscreen, PowerOnUse, 1, 1.0},
-	EquipNavConsole:     {EquipNavConsole, PowerOnUse, 2, 1.0},
-	EquipPilotConsole:   {EquipPilotConsole, PowerOnUse, 2, 1.0},
-	EquipScienceConsole: {EquipScienceConsole, PowerOnUse, 2, 1.0},
-	EquipCargoConsole:   {EquipCargoConsole, PowerOnUse, 1, 1.0},
+	EquipViewscreen: {EquipViewscreen, PowerOnUse, 1, 1.0},
 	EquipMedical:        {EquipMedical, PowerOnUse, 3, 1.0},
 	EquipFoodStation:    {EquipFoodStation, PowerOnUse, 2, 1.0},
 	EquipDrinkStation:   {EquipDrinkStation, PowerOnUse, 1, 1.0},
@@ -149,6 +155,8 @@ func (e *Equipment) Name() string {
 }
 
 var equipmentNames = map[EquipmentKind]string{
+	EquipDoor:            "Door",
+	EquipAirlock:         "Airlock",
 	EquipEngine:          "Engine",
 	EquipGenerator:       "Generator",
 	EquipMatterRecycler:  "Recycler",

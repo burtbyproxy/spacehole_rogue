@@ -30,6 +30,8 @@ type EquipmentKind uint8
 
 const (
 	EquipNone            EquipmentKind = iota
+	EquipDoor                          // door (On=auto-open, Open=open/closed)
+	EquipAirlock                       // airlock door (exit/entry point, not auto-open)
 	EquipBed                           // sleeping berth
 	EquipLocker                        // storage locker (future)
 	EquipViewscreen                    // displays external view
@@ -166,10 +168,14 @@ func (g *TileGrid) SetAllEquipmentOn(kind EquipmentKind, on bool) {
 // SetAllEquipmentState sets on/off for all toggleable equipment.
 func (g *TileGrid) SetAllEquipmentState(on bool) {
 	toggleable := map[EquipmentKind]bool{
-		EquipEngine:          true,
-		EquipGenerator:       true,
-		EquipMatterRecycler:  true,
+		EquipEngine:           true,
+		EquipGenerator:        true,
+		EquipMatterRecycler:   true,
 		EquipCargoTransporter: true,
+		EquipNavConsole:       true,
+		EquipPilotConsole:     true,
+		EquipScienceConsole:   true,
+		EquipCargoConsole:     true,
 	}
 	for i := range g.Tiles {
 		if eq := g.Tiles[i].Equipment; eq != nil && toggleable[eq.Kind] {
@@ -185,6 +191,28 @@ func (g *TileGrid) EquipmentKindAt(x, y int) EquipmentKind {
 		return t.Equipment.Kind
 	}
 	return EquipNone
+}
+
+// CountEquipment returns the number of tiles with the given equipment kind.
+func (g *TileGrid) CountEquipment(kind EquipmentKind) int {
+	count := 0
+	for _, t := range g.Tiles {
+		if t.Equipment != nil && t.Equipment.Kind == kind {
+			count++
+		}
+	}
+	return count
+}
+
+// ReservedPower returns the total power reserved by ON equipment with constant draw.
+func (g *TileGrid) ReservedPower() int {
+	total := 0
+	for _, t := range g.Tiles {
+		if eq := t.Equipment; eq != nil && eq.On && eq.PowerMode == PowerConstant {
+			total += eq.PowerCost
+		}
+	}
+	return total
 }
 
 // Describe returns a human-readable description of a tile.
@@ -207,6 +235,8 @@ var tileDescriptions = map[TileKind]string{
 }
 
 var equipDescriptions = map[EquipmentKind]string{
+	EquipDoor:           "Door - E: open/close, T: toggle auto",
+	EquipAirlock:        "Airlock - E: exit ship",
 	EquipBed:            "Sleeping Berth - rest to recover",
 	EquipLocker:         "Storage Locker - personal storage",
 	EquipViewscreen:     "Viewscreen - external view display",

@@ -70,9 +70,10 @@ func (r *Resources) TotalWaste() int {
 }
 
 // NewShuttleResources creates the starting resource state.
+// cargoPads is the number of cargo tile equipment in the ship layout.
 // You just woke from cryo — you've got some waste to deal with.
 // Matter is conserved: Water.Clean + Water.Dirty + BodyWater + WasteWater = Water.Capacity
-func NewShuttleResources() Resources {
+func NewShuttleResources(cargoPads int) Resources {
 	return Resources{
 		Water:    MatterPool{Clean: 78, Dirty: 17, Capacity: 100},
 		Organic:  MatterPool{Clean: 55, Dirty: 35, Capacity: 100},
@@ -89,7 +90,7 @@ func NewShuttleResources() Resources {
 		WasteWater:   5,
 		// Economy
 		Credits:   100,
-		CargoPads: make([]CargoPad, 12), // 12 cargo pads in shuttle
+		CargoPads: make([]CargoPad, cargoPads),
 	}
 }
 
@@ -178,6 +179,26 @@ type PlayerNeeds struct {
 	Hunger  int // 0 = full, 100 = starving
 	Thirst  int // 0 = hydrated, 100 = dehydrated
 	Hygiene int // 0 = clean, 100 = filthy
+
+	// Player health — damaged by critical needs, heals slowly when needs are OK
+	Health    int // current health
+	MaxHealth int // max health (lowered by starvation, restored by eating)
+}
+
+// NewPlayerNeeds creates default player needs.
+func NewPlayerNeeds() PlayerNeeds {
+	return PlayerNeeds{
+		Hunger:    0,
+		Thirst:    0,
+		Hygiene:   0,
+		Health:    100,
+		MaxHealth: 100,
+	}
+}
+
+// IsDead returns true if the player has died.
+func (n *PlayerNeeds) IsDead() bool {
+	return n.Health <= 0
 }
 
 // NeedLevel returns a human-readable label for a need value.

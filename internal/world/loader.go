@@ -7,13 +7,14 @@ import (
 
 // ShipLayout is the JSON-serializable definition of a ship layout.
 type ShipLayout struct {
-	Name   string       `json:"name"`
-	Class  string       `json:"class"`
-	Width  int          `json:"width"`
-	Height int          `json:"height"`
-	Tiles  []string     `json:"tiles"`
-	Rooms  []RoomDef    `json:"rooms"`
-	Spawn  [2]int       `json:"spawn"`
+	Name    string       `json:"name"`
+	Class   string       `json:"class"`
+	Width   int          `json:"width"`
+	Height  int          `json:"height"`
+	Tiles   []string     `json:"tiles"`
+	Rooms   []RoomDef    `json:"rooms"`
+	Spawn   [2]int       `json:"spawn"`
+	Airlock [2]int       `json:"airlock,omitempty"` // optional explicit airlock position
 }
 
 // RoomDef defines a named room in a ship layout.
@@ -54,6 +55,22 @@ func (l *ShipLayout) SpawnX() int { return l.Spawn[0] }
 // SpawnY returns the player spawn Y coordinate.
 func (l *ShipLayout) SpawnY() int { return l.Spawn[1] }
 
+// AirlockX returns the airlock X coordinate (or spawn X if not set).
+func (l *ShipLayout) AirlockX() int {
+	if l.Airlock[0] != 0 || l.Airlock[1] != 0 {
+		return l.Airlock[0]
+	}
+	return l.Spawn[0]
+}
+
+// AirlockY returns the airlock Y coordinate (or spawn Y if not set).
+func (l *ShipLayout) AirlockY() int {
+	if l.Airlock[0] != 0 || l.Airlock[1] != 0 {
+		return l.Airlock[1]
+	}
+	return l.Spawn[1]
+}
+
 func charToTile(ch rune) Tile {
 	switch ch {
 	case '#':
@@ -61,7 +78,9 @@ func charToTile(ch rune) Tile {
 	case '.':
 		return Tile{Kind: TileFloor}
 	case '+':
-		return Tile{Kind: TileDoor}
+		return Tile{Kind: TileDoor, Equipment: NewEquipment(EquipDoor)}
+	case 'O':
+		return Tile{Kind: TileDoor, Equipment: NewEquipment(EquipAirlock)}
 	// --- crew quarters ---
 	case 'b':
 		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipBed)}
@@ -111,7 +130,7 @@ func charToTile(ch rune) Tile {
 	// --- cargo ---
 	case 'c':
 		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipCargoTile)}
-	case 'x':
+	case 'x', 'X':
 		return Tile{Kind: TileFloor, Equipment: NewEquipment(EquipCargoTransporter)}
 	default:
 		return Tile{Kind: TileVoid}

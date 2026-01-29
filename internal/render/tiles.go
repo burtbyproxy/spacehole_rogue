@@ -15,7 +15,7 @@ func RenderTileGrid(buf *CellBuffer, grid *world.TileGrid, offsetX, offsetY int)
 
 func tileVisuals(t world.Tile) (glyph byte, fg, bg uint8) {
 	if t.Equipment != nil {
-		return equipVisuals(t.Equipment.Kind, t.Equipment.On)
+		return equipVisuals(t.Equipment)
 	}
 
 	switch t.Kind {
@@ -30,8 +30,16 @@ func tileVisuals(t world.Tile) (glyph byte, fg, bg uint8) {
 	}
 }
 
-func equipVisuals(eq world.EquipmentKind, on bool) (glyph byte, fg, bg uint8) {
-	switch eq {
+func equipVisuals(e *world.Equipment) (glyph byte, fg, bg uint8) {
+	switch e.Kind {
+	// --- doors ---
+	case world.EquipDoor:
+		if e.Open {
+			return '-', ColorDarkGray, 17 // open door: dash on very dark bg
+		}
+		return '+', ColorDarkGray, ColorLightGray // closed door: + on light bg
+	case world.EquipAirlock:
+		return 'O', ColorLightCyan, ColorDarkGray // airlock: always visible, can't toggle
 	// --- crew quarters ---
 	case world.EquipBed:
 		return 127, ColorBrown, ColorBlack // ⌂ sleeping berth (open box)
@@ -51,7 +59,7 @@ func equipVisuals(eq world.EquipmentKind, on bool) (glyph byte, fg, bg uint8) {
 		return '=', ColorBrown, ColorBlack // cargo console
 	case world.EquipCargoTransporter:
 		// Toggleable - show darker when OFF
-		if on {
+		if e.On {
 			return 'X', ColorLightCyan, ColorBlack
 		}
 		return 'X', ColorDarkGray, ColorBlack
@@ -82,20 +90,20 @@ func equipVisuals(eq world.EquipmentKind, on bool) (glyph byte, fg, bg uint8) {
 	// --- processors: all ▒ with color variant ---
 	case world.EquipMatterRecycler:
 		// Toggleable - show darker when OFF
-		if on {
+		if e.On {
 			return 177, ColorLightMagenta, ColorBlack
 		}
 		return 177, ColorDarkGray, ColorBlack
 	case world.EquipGenerator:
 		// Toggleable - show darker when OFF
-		if on {
+		if e.On {
 			return 177, ColorBrown, ColorBlack
 		}
 		return 177, ColorDarkGray, ColorBlack
 	// --- propulsion ---
 	case world.EquipEngine:
 		// Toggleable - show darker when OFF
-		if on {
+		if e.On {
 			return '%', ColorBrown, ColorBlack
 		}
 		return '%', ColorDarkGray, ColorBlack
@@ -197,7 +205,7 @@ func RenderSurfaceGridWithFog(buf *CellBuffer, grid *world.TileGrid, terrain wor
 func surfaceTileVisuals(t world.Tile, terrain world.TerrainType) (glyph byte, fg, bg uint8) {
 	// Equipment takes priority - but use terrain background
 	if t.Equipment != nil {
-		glyph, fg, _ = equipVisuals(t.Equipment.Kind, t.Equipment.On)
+		glyph, fg, _ = equipVisuals(t.Equipment)
 		return glyph, fg, terrainBG(terrain)
 	}
 

@@ -17,10 +17,14 @@ const (
 	recyclerProcessInterval = 100  // recycler converts 1 buffered dirty → clean every ~1.7 sec
 	bodyDigestInterval      = 300  // body converts 1 clean organic → waste every 5 sec
 	bodyWaterInterval       = 240  // body converts 1 clean water → waste every 4 sec
-	hungerInterval          = 480  // hunger rises 1 every 8 sec (~13 min 0→100, ~16 game hours)
-	thirstInterval          = 300  // thirst rises 1 every 5 sec (~8 min 0→100, ~10 game hours)
-	hygieneInterval         = 720  // hygiene worsens 1 every 12 sec (~20 min 0→100, ~24 game hours)
+	hungerInterval          = 3600 // hunger rises 1 every 60 sec (~100 min 0→100, ~5 game days)
+	thirstInterval          = 1800 // thirst rises 1 every 30 sec (~50 min 0→100, ~2.5 game days)
+	hygieneInterval         = 1800 // hygiene worsens 1 every 30 sec (~50 min 0→100, ~2.5 game days)
 	warningInterval         = 900  // check warnings every 15 sec
+	// Damage from critical needs
+	starveDamageInterval    = 720  // at hunger=100: lose 1 max health every 12 sec (~20 min to die)
+	dehydrateDamageInterval = 240  // at thirst=100: lose 1 health every 4 sec (~7 min to die)
+	healthRegenInterval     = 600  // heal 1 health every 10 sec when needs are OK
 )
 
 // Sim is the game simulation. It owns all gameplay state.
@@ -65,8 +69,17 @@ type Sim struct {
 	ScanActivated   bool // set when player uses science console
 	CommsActivated  bool // set when player uses viewscreen with pending hail
 
+	// Game over state
+	PlayerDead  bool
+	DeathReason string
+
 	player ecs.Entity
 	posMap *ecs.Map[Position]
+}
+
+// IsGameOver returns true if the player has died.
+func (s *Sim) IsGameOver() bool {
+	return s.PlayerDead
 }
 
 // NewSim creates a simulation from a ship layout.
@@ -94,12 +107,15 @@ func NewSim(layout *world.ShipLayout) *Sim {
 	disc.StarTypesSeen[int(sector.Systems[0].Type)] = true
 	disc.TotalStarTypesSeen = 1
 
+	// Count cargo pads from the actual ship layout
+	cargoPadCount := grid.CountEquipment(world.EquipCargoTile)
+
 	s := &Sim{
 		ECS:            w,
 		Grid:           grid,
 		Layout:         layout,
-		Resources:      NewShuttleResources(),
-		Needs:          PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20},
+		Resources:      NewShuttleResources(cargoPadCount),
+		Needs:          PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20, Health: 100, MaxHealth: 100},
 		Log:            log,
 		Sector:         sector,
 		Discovery:      disc,
@@ -142,14 +158,17 @@ func NewSimWithPrologue(layout *world.ShipLayout, seed int64) *Sim {
 	// Don't mark any system as visited yet - we're stranded before reaching one
 	disc.TotalSystemsVisited = 0
 
+	// Count cargo pads from the actual ship layout
+	cargoPadCount := grid.CountEquipment(world.EquipCargoTile)
+
 	// Equipment defaults to off (EquipmentOn = false in tiles)
 	// Shuttle is broken - nothing works until prologue complete
 	s := &Sim{
 		ECS:             w,
 		Grid:            grid,
 		Layout:          layout,
-		Resources:       NewShuttleResources(),
-		Needs:           PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20},
+		Resources:       NewShuttleResources(cargoPadCount),
+		Needs:           PlayerNeeds{Hunger: 40, Thirst: 30, Hygiene: 20, Health: 100, MaxHealth: 100},
 		Log:             log,
 		Sector:          sector,
 		Discovery:       disc,
@@ -210,10 +229,22 @@ func (s *Sim) PrologueInteract() {
 		}
 
 	case world.EquipLootCrate:
-		// During prologue, shuttle may not have power - can't beam, too heavy to carry
-		s.Log.Add("Found salvage, but it's too heavy to carry.", MsgWarning)
-		s.Log.Add("Get the shuttle running first.", MsgInfo)
-		// Don't remove crate - player can come back later... or not, it's prologue
+		// Check if cargo transporter is on - if so, beam it up!
+		if s.Grid.AnyEquipmentOn(world.EquipCargoTransporter) {
+			surf.LootCollected++
+			cargoKind := CargoKind(CargoScrapMetal + CargoKind(surf.LootCollected%5))
+			added := s.Resources.AddCargo(cargoKind, 1)
+			if added > 0 {
+				s.Log.Add(fmt.Sprintf("Found %s! Cargo transporter locked on.", CargoName(cargoKind)), MsgDiscovery)
+			} else {
+				s.Log.Add("Crate searched. Cargo bay full.", MsgWarning)
+			}
+			surf.Grid.Set(surf.PlayerX, surf.PlayerY, world.Tile{Kind: tile.Kind})
+		} else {
+			// Shuttle not ready or transporter off
+			s.Log.Add("Found salvage, but it's too heavy to carry.", MsgWarning)
+			s.Log.Add("Turn on the cargo transporter first.", MsgInfo)
+		}
 
 	default:
 		s.Log.Add("Nothing to interact with here.", MsgSocial)
@@ -261,6 +292,13 @@ func (s *Sim) PlayerPos() (int, int) {
 	return pos.X, pos.Y
 }
 
+// SetPlayerPos teleports the player to the given coordinates.
+func (s *Sim) SetPlayerPos(x, y int) {
+	pos := s.posMap.Get(s.player)
+	pos.X = x
+	pos.Y = y
+}
+
 // TryMovePlayer attempts to move the player by (dx, dy).
 func (s *Sim) TryMovePlayer(dx, dy int) bool {
 	pos := s.posMap.Get(s.player)
@@ -276,6 +314,10 @@ func (s *Sim) TryMovePlayer(dx, dy int) bool {
 
 // Tick advances the simulation by one step.
 func (s *Sim) Tick() {
+	if s.PlayerDead {
+		return // no more simulation after death
+	}
+
 	s.Ticks++
 	s.tickPower()
 	s.tickGenerator()
@@ -287,6 +329,19 @@ func (s *Sim) Tick() {
 	s.tickHails()
 	if s.Ticks%warningInterval == 0 {
 		s.checkWarnings()
+	}
+
+	// Check for player death
+	if s.Needs.IsDead() {
+		s.PlayerDead = true
+		if s.Needs.Thirst >= 100 {
+			s.DeathReason = "You died of dehydration."
+		} else if s.Needs.MaxHealth <= 0 {
+			s.DeathReason = "You wasted away from starvation."
+		} else {
+			s.DeathReason = "You died."
+		}
+		s.Log.Add(s.DeathReason, MsgCritical)
 	}
 }
 
@@ -380,17 +435,16 @@ func (s *Sim) tickRecycler() {
 		}
 	}
 
-	// Process phase: convert buffered dirty → clean, costs 1 energy each
+	// Process phase: convert buffered dirty → clean
+	// Power cost is handled by constant draw reservation (10 power while ON)
 	if s.Ticks%recyclerProcessInterval == 0 {
-		if rc.WaterBuffer > 0 && r.Energy > 0 {
+		if rc.WaterBuffer > 0 {
 			rc.WaterBuffer--
 			r.Water.Clean++
-			r.Energy--
 		}
-		if rc.OrganicBuffer > 0 && r.Energy > 0 {
+		if rc.OrganicBuffer > 0 {
 			rc.OrganicBuffer--
 			r.Organic.Clean++
-			r.Energy--
 		}
 	}
 }
@@ -430,6 +484,34 @@ func (s *Sim) tickNeeds() {
 	if s.Ticks%hygieneInterval == 0 {
 		n.Hygiene = min(n.Hygiene+1, 100)
 	}
+
+	// Starvation damage: at hunger=100, slowly lower max health
+	// This simulates wasting away — you can survive a while but get weaker
+	if n.Hunger >= 100 && s.Ticks%starveDamageInterval == 0 {
+		n.MaxHealth = max(1, n.MaxHealth-1)
+		if n.Health > n.MaxHealth {
+			n.Health = n.MaxHealth
+		}
+		if n.MaxHealth <= 20 {
+			s.Log.Add("Starving... body wasting away.", MsgCritical)
+		}
+	}
+
+	// Dehydration damage: at thirst=100, take direct damage (faster death)
+	if n.Thirst >= 100 && s.Ticks%dehydrateDamageInterval == 0 {
+		n.Health = max(0, n.Health-1)
+		if n.Health <= 20 && n.Health > 0 {
+			s.Log.Add("Dehydration critical... need water!", MsgCritical)
+		}
+	}
+
+	// Health regeneration: slowly heal when needs are under control
+	if n.Hunger < 80 && n.Thirst < 80 && n.Health < n.MaxHealth && s.Ticks%healthRegenInterval == 0 {
+		n.Health = min(n.MaxHealth, n.Health+1)
+	}
+
+	// Restore max health when eating (hunger goes down significantly)
+	// This is handled in the food station interaction
 }
 
 func (s *Sim) tickSystemMapNPCs() {
@@ -525,7 +607,13 @@ func (s *Sim) Interact() {
 		r.Organic.Clean -= 5
 		r.BodyOrganic += 5
 		s.Needs.Hunger = max(s.Needs.Hunger-35, 0)
-		s.Log.Add("Dispensed a meal. Tastes like... Tuesday.", MsgInfo)
+		// Eating restores max health lost to starvation
+		if s.Needs.MaxHealth < 100 {
+			s.Needs.MaxHealth = min(100, s.Needs.MaxHealth+5)
+			s.Log.Add("Dispensed a meal. Feeling stronger.", MsgInfo)
+		} else {
+			s.Log.Add("Dispensed a meal. Tastes like... Tuesday.", MsgInfo)
+		}
 		if s.Skills.AddXP(SkillSurvival, 2.0) {
 			LogLevelUp(s.Log, SkillSurvival, s.Skills.Level(SkillSurvival))
 		}
@@ -589,11 +677,19 @@ func (s *Sim) Interact() {
 		s.Log.Add("Storage locker. Empty for now.", MsgSocial)
 
 	case world.EquipNavConsole:
+		if !eq.On {
+			s.Log.Add("Navigation console is powered off. Press T to turn it on.", MsgWarning)
+			return
+		}
 		eq.Use(&r.Energy)
 		s.NavActivated = true
 		s.Log.Add("Navigation console activated.", MsgInfo)
 
 	case world.EquipPilotConsole:
+		if !eq.On {
+			s.Log.Add("Pilot console is powered off. Press T to turn it on.", MsgWarning)
+			return
+		}
 		eq.Use(&r.Energy)
 		if s.IsOrbiting() {
 			// Check if planet has a scanned POI for landing
@@ -613,6 +709,10 @@ func (s *Sim) Interact() {
 		}
 
 	case world.EquipScienceConsole:
+		if !eq.On {
+			s.Log.Add("Science console is powered off. Press T to turn it on.", MsgWarning)
+			return
+		}
 		eq.Use(&r.Energy)
 		s.ScanActivated = true
 		if s.IsOrbiting() {
@@ -733,12 +833,29 @@ func (s *Sim) Interact() {
 		}
 
 	case world.EquipCargoConsole:
+		if !eq.On {
+			s.Log.Add("Cargo console is powered off. Press T to turn it on.", MsgWarning)
+			return
+		}
 		eq.Use(&r.Energy)
 		s.CargoActivated = true
 		s.Log.Add("Cargo console activated.", MsgInfo)
 
 	case world.EquipCargoTile:
 		s.Log.Add("Cargo pad. Empty.", MsgInfo)
+
+	case world.EquipDoor:
+		// E opens/closes the door
+		eq.Open = !eq.Open
+		if eq.Open {
+			s.Log.Add("Door opened.", MsgInfo)
+		} else {
+			s.Log.Add("Door closed.", MsgInfo)
+		}
+
+	case world.EquipAirlock:
+		// E on airlock = exit/enter ship (handled elsewhere, just show message)
+		s.Log.Add("Airlock. Exit to surface or space.", MsgInfo)
 
 	default:
 		s.Log.Add("Nothing to interact with here.", MsgSocial)
@@ -763,6 +880,11 @@ func (s *Sim) ToggleEquipment() {
 
 	switch eq.Kind {
 	case world.EquipEngine:
+		// Can't turn on broken engine during prologue
+		if !eq.On && s.InPrologue() && !s.PrologueSurface.PartsFound {
+			s.Log.Add("Engine damaged. Find spare parts to repair it first.", MsgWarning)
+			return
+		}
 		eq.On = !eq.On
 		if eq.On {
 			s.Log.Add("Engine started.", MsgInfo)
@@ -774,6 +896,11 @@ func (s *Sim) ToggleEquipment() {
 		}
 
 	case world.EquipGenerator:
+		// Generator needs power to bootstrap - can't turn on with 0 energy
+		if !eq.On && s.Resources.Energy < 1 {
+			s.Log.Add("Generator needs power to bootstrap. Find a power pack.", MsgWarning)
+			return
+		}
 		eq.On = !eq.On
 		if eq.On {
 			s.Log.Add("Generator online. Producing energy.", MsgInfo)
@@ -801,6 +928,51 @@ func (s *Sim) ToggleEquipment() {
 			s.Log.Add("Cargo transporter online. Ready to beam.", MsgInfo)
 		} else {
 			s.Log.Add("Cargo transporter offline.", MsgInfo)
+		}
+
+	case world.EquipDoor:
+		// T toggles auto-open mode for doors
+		eq.On = !eq.On
+		if eq.On {
+			s.Log.Add("Door set to auto-open.", MsgInfo)
+		} else {
+			s.Log.Add("Door set to manual.", MsgInfo)
+		}
+
+	case world.EquipAirlock:
+		// Can't toggle airlock open - safety feature!
+		s.Log.Add("Airlock cannot be left open. Safety protocols.", MsgWarning)
+
+	case world.EquipNavConsole:
+		eq.On = !eq.On
+		if eq.On {
+			s.Log.Add("Navigation console powered on.", MsgInfo)
+		} else {
+			s.Log.Add("Navigation console powered down.", MsgInfo)
+		}
+
+	case world.EquipPilotConsole:
+		eq.On = !eq.On
+		if eq.On {
+			s.Log.Add("Pilot console powered on.", MsgInfo)
+		} else {
+			s.Log.Add("Pilot console powered down.", MsgInfo)
+		}
+
+	case world.EquipScienceConsole:
+		eq.On = !eq.On
+		if eq.On {
+			s.Log.Add("Science console powered on.", MsgInfo)
+		} else {
+			s.Log.Add("Science console powered down.", MsgInfo)
+		}
+
+	case world.EquipCargoConsole:
+		eq.On = !eq.On
+		if eq.On {
+			s.Log.Add("Cargo console powered on.", MsgInfo)
+		} else {
+			s.Log.Add("Cargo console powered down.", MsgInfo)
 		}
 
 	default:
@@ -1307,6 +1479,8 @@ func (s *Sim) BoardShuttle() {
 	if s.ActiveSurface == nil {
 		return
 	}
+	// Position player at the airlock (entry point)
+	s.SetPlayerPos(s.Layout.AirlockX(), s.Layout.AirlockY())
 	s.Log.Add("Boarding the shuttle.", MsgInfo)
 	// ActiveSurface stays set - shuttle is still landed
 }
@@ -1340,6 +1514,8 @@ func (s *Sim) LiftOff() {
 		s.Log.Add("Objective abandoned.", MsgWarning)
 	}
 
+	// Position player at the airlock
+	s.SetPlayerPos(s.Layout.AirlockX(), s.Layout.AirlockY())
 	s.Log.Add("Lifting off. Returning to orbit.", MsgInfo)
 	s.ActiveSurface = nil
 }

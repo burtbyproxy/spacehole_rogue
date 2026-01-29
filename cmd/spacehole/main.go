@@ -230,14 +230,14 @@ func (g *Game) drawShipView() {
 
 	// HUD matter bars (live from sim)
 	r := &g.sim.Resources
-	buf.WriteString(2, hudRow, "--- Matter ---", render.ColorLightCyan, render.ColorBlack)
-	drawMatterBar(buf, 2, hudRow+1, "Water  ", &r.Water, render.ColorBlue, render.ColorDarkGray)
-	drawMatterBar(buf, 2, hudRow+2, "Organic", &r.Organic, render.ColorGreen, render.ColorDarkGray)
-	drawEnergyBar(buf, 2, hudRow+3, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
-	drawSimpleBar(buf, 2, hudRow+4, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
+	g.Text(2, hudRow, "--- Matter ---", render.ColorLightCyan)
+	g.drawMatterBar(2, hudRow+1, "Water  ", &r.Water, render.ColorLightCyan, render.ColorBlue)
+	g.drawMatterBar(2, hudRow+2, "Organic", &r.Organic, render.ColorLightGreen, render.ColorGreen)
+	g.drawEnergyBar(2, hudRow+3, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
+	g.drawSimpleBar(2, hudRow+4, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
 	// Credits and cargo
-	buf.WriteString(2, hudRow+5, fmt.Sprintf("Credits: %d  Cargo: %d/%d pads",
-		r.Credits, r.PadsUsed(), len(r.CargoPads)), render.ColorLightCyan, render.ColorBlack)
+	g.Text(2, hudRow+5, fmt.Sprintf("Credits: %d  Cargo: %d/%d pads",
+		r.Credits, r.PadsUsed(), len(r.CargoPads)), render.ColorLightCyan)
 	// Player body indicator
 	fullness := r.BodyFullness()
 	if fullness > 0 {
@@ -245,41 +245,41 @@ func (g *Game) drawShipView() {
 		if r.TotalWaste() >= 20 {
 			bodyClr = render.ColorYellow
 		}
-		buf.WriteString(2, hudRow+6, fmt.Sprintf("Body: %d/%d full (%d waste)",
-			fullness, game.MaxBodyFullness, r.TotalWaste()), bodyClr, render.ColorBlack)
+		g.Text(2, hudRow+6, fmt.Sprintf("Body: %d/%d full (%d waste)",
+			fullness, game.MaxBodyFullness, r.TotalWaste()), bodyClr)
 	}
 
 	// Equipment status (right panel, below legend)
 	row++ // gap
-	buf.WriteString(panelX, row, "--- Equipment ---", render.ColorLightCyan, render.ColorBlack)
+	g.Text(panelX, row, "--- Equipment ---", render.ColorLightCyan)
 	row++
-	drawEquipStatus(buf, panelX, row, "Engine", g.sim.Grid.AnyEquipmentOn(world.EquipEngine))
+	g.drawEquipStatus(panelX, row, "Engine", g.sim.Grid.AnyEquipmentOn(world.EquipEngine))
 	row++
-	drawEquipStatus(buf, panelX, row, "Generator", g.sim.Grid.AnyEquipmentOn(world.EquipGenerator))
+	g.drawEquipStatus(panelX, row, "Generator", g.sim.Grid.AnyEquipmentOn(world.EquipGenerator))
 	row++
-	drawEquipStatus(buf, panelX, row, "Recycler", g.sim.Grid.AnyEquipmentOn(world.EquipMatterRecycler))
+	g.drawEquipStatus(panelX, row, "Recycler", g.sim.Grid.AnyEquipmentOn(world.EquipMatterRecycler))
 	row++
-	drawEquipStatus(buf, panelX, row, "Transporter", g.sim.Grid.AnyEquipmentOn(world.EquipCargoTransporter))
+	g.drawEquipStatus(panelX, row, "Transporter", g.sim.Grid.AnyEquipmentOn(world.EquipCargoTransporter))
 	row++
 
 	// Player needs (right panel, below equipment)
 	n := &g.sim.Needs
 	row++ // gap
-	buf.WriteString(panelX, row, "--- Status ---", render.ColorLightCyan, render.ColorBlack)
+	g.Text(panelX, row, "--- Status ---", render.ColorLightCyan)
 	row++
-	drawNeedBar(buf, panelX, row, "Hunger ", n.Hunger)
+	g.drawNeedBar(panelX, row, "Hunger ", n.Hunger)
 	row++
-	drawNeedBar(buf, panelX, row, "Thirst ", n.Thirst)
+	g.drawNeedBar(panelX, row, "Thirst ", n.Thirst)
 	row++
-	drawNeedBar(buf, panelX, row, "Hygiene", n.Hygiene)
+	g.drawNeedBar(panelX, row, "Hygiene", n.Hygiene)
 	row += 2
 
 	// Standing on indicator
 	px, py := g.sim.PlayerPos()
 	tile := g.sim.Grid.Get(px, py)
-	buf.WriteString(panelX, row, "Standing on:", render.ColorDarkGray, render.ColorBlack)
+	g.Text(panelX, row, "Standing on:", render.ColorDarkGray)
 	row++
-	buf.WriteString(panelX+1, row, tile.Describe(), render.ColorLightGray, render.ColorBlack)
+	g.Text(panelX, row, " "+tile.Describe(), render.ColorLightGray)
 
 	// Message log (live from sim) - tight text for readability
 	// Blinking hail alert when pending hail exists
@@ -380,8 +380,8 @@ func (g *Game) drawSectorMapView() {
 	// Ship status summary
 	r := &g.sim.Resources
 	buf.WriteString(infoX, 11, "--- Ship ---", render.ColorLightCyan, render.ColorBlack)
-	drawEnergyBar(buf, infoX, 12, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
-	drawSimpleBar(buf, infoX, 13, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
+	g.drawEnergyBar(infoX, 12, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
+	g.drawSimpleBar(infoX, 13, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
 
 	// Explored counter
 	visited := 0
@@ -600,9 +600,9 @@ func (g *Game) drawSystemMapView() {
 	r := &g.sim.Resources
 	buf.WriteString(infoX, row, "--- Ship ---", render.ColorLightCyan, render.ColorBlack)
 	row++
-	drawEnergyBar(buf, infoX, row, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
+	g.drawEnergyBar(infoX, row, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
 	row++
-	drawSimpleBar(buf, infoX, row, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
+	g.drawSimpleBar(infoX, row, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
 	row += 2
 	buf.WriteString(infoX, row, fmt.Sprintf("Pos: %d, %d", sm.Shuttle.TileX(), sm.Shuttle.TileY()), render.ColorDarkGray, render.ColorBlack)
 	row++
@@ -834,14 +834,15 @@ func msgColor(p game.MsgPriority) uint8 {
 }
 
 // drawMatterBar shows a bar split into clean (solid) and dirty (shaded) segments.
-func drawMatterBar(buf *render.CellBuffer, x, y int, label string, pool *game.MatterPool, cleanClr, dirtyClr uint8) {
+func (g *Game) drawMatterBar(x, y int, label string, pool *game.MatterPool, cleanClr, dirtyClr uint8) {
+	buf := g.buffer
 	barW := 20
 	cap := pool.Capacity
 	if cap == 0 {
 		cap = 1
 	}
-	cleanFill := barW * pool.Clean / cap
 	dirtyFill := barW * pool.Dirty / cap
+	cleanFill := barW * pool.Clean / cap
 
 	// Label color based on clean level
 	labelClr := uint8(render.ColorLightGray)
@@ -851,67 +852,111 @@ func drawMatterBar(buf *render.CellBuffer, x, y int, label string, pool *game.Ma
 	} else if cleanPct <= 30 {
 		labelClr = render.ColorYellow
 	}
-	buf.WriteString(x, y, label, labelClr, render.ColorBlack)
+	g.Text(x, y, label, labelClr)
 
+	// Bar: dirty (dark, left) → clean (bright, right) → empty (lost/held)
+	barStart := x + 4
 	for i := 0; i < barW; i++ {
-		if i < cleanFill {
-			buf.Set(x+8+i, y, 219, cleanClr, render.ColorBlack) // █ clean
-		} else if i < cleanFill+dirtyFill {
-			buf.Set(x+8+i, y, 178, dirtyClr, render.ColorBlack) // ▓ dirty
+		if i < dirtyFill {
+			buf.Set(barStart+i, y, 219, dirtyClr, render.ColorBlack) // █ dirty (dark)
+		} else if i < dirtyFill+cleanFill {
+			buf.Set(barStart+i, y, 219, cleanClr, render.ColorBlack) // █ clean (bright)
 		} else {
-			buf.Set(x+8+i, y, 176, render.ColorBlack, render.ColorBlack) // ░ lost/held
+			buf.Set(barStart+i, y, 176, render.ColorDarkGray, render.ColorBlack) // ░ lost/held
 		}
 	}
 	info := fmt.Sprintf("%2dc/%2dd", pool.Clean, pool.Dirty)
-	buf.WriteString(x+29, y, info, labelClr, render.ColorBlack)
+	g.Text(x+25, y, info, labelClr)
 }
 
-// drawEnergyBar shows a single-value bar (no clean/dirty split).
-func drawEnergyBar(buf *render.CellBuffer, x, y int, label string, val, max int, clr uint8) {
+// drawEnergyBar shows energy with reserved power in dark gold.
+func (g *Game) drawEnergyBar(x, y int, label string, val, maxVal int, clr uint8) {
+	buf := g.buffer
 	barW := 20
-	if max == 0 {
-		max = 1
+	if maxVal == 0 {
+		maxVal = 1
 	}
-	filled := barW * val / max
+	filled := barW * val / maxVal
+	reserved := g.sim.PowerReserved()
+	reservedCells := barW * reserved / maxVal
+	if reservedCells > filled {
+		reservedCells = filled // can't show more reserved than we have
+	}
 
 	labelClr := uint8(render.ColorLightGray)
-	pct := val * 100 / max
+	available := val - reserved
+	if available < 0 {
+		available = 0
+	}
+	pct := val * 100 / maxVal
 	if pct <= 15 {
 		labelClr = render.ColorLightRed
 	} else if pct <= 30 {
 		labelClr = render.ColorYellow
 	}
-	buf.WriteString(x, y, label, labelClr, render.ColorBlack)
+	g.Text(x, y, label, labelClr)
 
+	// Bar starts after label (using tight text: 8 chars * 8px = 64px = 4 cells)
+	barStart := x + 4
 	for i := 0; i < barW; i++ {
-		if i < filled {
-			buf.Set(x+8+i, y, 219, clr, render.ColorBlack) // █
+		if i < reservedCells {
+			// Reserved power - dark gold
+			buf.Set(barStart+i, y, 219, render.ColorDarkGold, render.ColorBlack) // █
+		} else if i < filled {
+			// Free power - yellow
+			buf.Set(barStart+i, y, 219, clr, render.ColorBlack) // █
 		} else {
-			buf.Set(x+8+i, y, 176, render.ColorDarkGray, render.ColorBlack) // ░
+			buf.Set(barStart+i, y, 176, render.ColorDarkGray, render.ColorBlack) // ░
 		}
 	}
-	info := fmt.Sprintf("%3d/%d", val, max)
-	buf.WriteString(x+29, y, info, labelClr, render.ColorBlack)
+	// Show both total and available
+	info := fmt.Sprintf("%3d/%d (%d free)", val, maxVal, available)
+	g.Text(x+25, y, info, labelClr)
 }
 
-// drawSimpleBar is a basic percentage bar (for hull, etc.)
-func drawSimpleBar(buf *render.CellBuffer, x, y int, label string, val, max int, clr uint8) {
-	drawEnergyBar(buf, x, y, label, val, max, clr)
+// drawSimpleBar is a basic percentage bar (for hull, etc.) - no reserved power logic.
+func (g *Game) drawSimpleBar(x, y int, label string, val, maxVal int, clr uint8) {
+	buf := g.buffer
+	barW := 20
+	if maxVal == 0 {
+		maxVal = 1
+	}
+	filled := barW * val / maxVal
+
+	labelClr := uint8(render.ColorLightGray)
+	pct := val * 100 / maxVal
+	if pct <= 15 {
+		labelClr = render.ColorLightRed
+	} else if pct <= 30 {
+		labelClr = render.ColorYellow
+	}
+	g.Text(x, y, label, labelClr)
+
+	barStart := x + 4
+	for i := 0; i < barW; i++ {
+		if i < filled {
+			buf.Set(barStart+i, y, 219, clr, render.ColorBlack) // █
+		} else {
+			buf.Set(barStart+i, y, 176, render.ColorDarkGray, render.ColorBlack) // ░
+		}
+	}
+	info := fmt.Sprintf("%3d/%d", val, maxVal)
+	g.Text(x+25, y, info, labelClr)
 }
 
 // drawEquipStatus renders an ON/OFF indicator for toggleable equipment.
-func drawEquipStatus(buf *render.CellBuffer, x, y int, name string, on bool) {
+func (g *Game) drawEquipStatus(x, y int, name string, on bool) {
 	if on {
-		buf.WriteString(x, y, fmt.Sprintf(" %s", name), render.ColorLightGreen, render.ColorBlack)
-		buf.WriteString(x+len(name)+1, y, " ON", render.ColorLightGreen, render.ColorBlack)
+		g.Text(x, y, fmt.Sprintf(" %s ON", name), render.ColorLightGreen)
 	} else {
-		buf.WriteString(x, y, fmt.Sprintf(" %s", name), render.ColorDarkGray, render.ColorBlack)
-		buf.WriteString(x+len(name)+1, y, " OFF", render.ColorLightRed, render.ColorBlack)
+		g.Text(x, y, fmt.Sprintf(" %s", name), render.ColorDarkGray)
+		g.Text(x+len(name)+2, y, "OFF", render.ColorLightRed)
 	}
 }
 
 // drawNeedBar shows a player need (hunger/thirst/hygiene) as a 10-char bar with label.
-func drawNeedBar(buf *render.CellBuffer, x, y int, label string, val int) {
+func (g *Game) drawNeedBar(x, y int, label string, val int) {
+	buf := g.buffer
 	barW := 10
 	filled := barW * val / 100
 
@@ -926,16 +971,18 @@ func drawNeedBar(buf *render.CellBuffer, x, y int, label string, val int) {
 		clr = render.ColorLightGray
 	}
 
-	buf.WriteString(x, y, label, clr, render.ColorBlack)
+	g.Text(x, y, label, clr)
+	// Bar starts after label (8 chars * 8px = 64px = 4 cells)
+	barStart := x + 4
 	for i := 0; i < barW; i++ {
 		if i < filled {
-			buf.Set(x+8+i, y, 219, clr, render.ColorBlack) // █
+			buf.Set(barStart+i, y, 219, clr, render.ColorBlack) // █
 		} else {
-			buf.Set(x+8+i, y, 176, render.ColorDarkGray, render.ColorBlack) // ░
+			buf.Set(barStart+i, y, 176, render.ColorDarkGray, render.ColorBlack) // ░
 		}
 	}
 	lvl := game.NeedLevel(val)
-	buf.WriteString(x+19, y, lvl, clr, render.ColorBlack)
+	g.Text(x+15, y, lvl, clr)
 }
 
 // --- Update dispatch ---
@@ -997,10 +1044,10 @@ func (g *Game) updateShip() error {
 
 	// Interact / Toggle
 	if inpututil.IsKeyJustPressed(ebiten.KeyE) {
-		// Check if on a door tile - if landed, exit to surface
+		// Check if on airlock - if landed, exit to surface
 		px, py := g.sim.PlayerPos()
-		tile := g.sim.Grid.Get(px, py)
-		if tile.Kind == world.TileDoor && g.sim.IsOnSurface() {
+		eq := g.sim.Grid.GetEquipment(px, py)
+		if eq != nil && eq.Kind == world.EquipAirlock && g.sim.IsOnSurface() {
 			if g.sim.ExitShuttle() {
 				g.viewMode = ViewSurface
 			}
@@ -1315,10 +1362,10 @@ func (g *Game) drawStationMain(buf *render.CellBuffer) {
 	// Ship status (right panel)
 	infoX := panelX
 	buf.WriteString(infoX, 2, "--- Ship Status ---", render.ColorLightCyan, render.ColorBlack)
-	drawEnergyBar(buf, infoX, 3, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
-	drawSimpleBar(buf, infoX, 4, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
-	drawMatterBar(buf, infoX, 6, "Water  ", &r.Water, render.ColorBlue, render.ColorDarkGray)
-	drawMatterBar(buf, infoX, 7, "Organic", &r.Organic, render.ColorGreen, render.ColorDarkGray)
+	g.drawEnergyBar(infoX, 3, "Energy ", r.Energy, r.MaxEnergy, render.ColorYellow)
+	g.drawSimpleBar(infoX, 4, "Hull   ", r.Hull, r.MaxHull, render.ColorLightGray)
+	g.drawMatterBar(infoX, 6, "Water  ", &r.Water, render.ColorLightCyan, render.ColorBlue)
+	g.drawMatterBar(infoX, 7, "Organic", &r.Organic, render.ColorLightGreen, render.ColorGreen)
 
 	buf.WriteString(2, gridRows-1, "1-5: Select  ESC: Undock", render.ColorDarkGray, render.ColorBlack)
 }
@@ -1330,7 +1377,7 @@ func (g *Game) drawStationRepairs(buf *render.CellBuffer) {
 
 	buf.WriteString(cx, 2, "--- REPAIRS & MAINTENANCE ---", render.ColorLightCyan, render.ColorBlack)
 	buf.WriteString(cx, 4, fmt.Sprintf("Hull: %d / %d", r.Hull, r.MaxHull), render.ColorWhite, render.ColorBlack)
-	drawSimpleBar(buf, cx, 5, "       ", r.Hull, r.MaxHull, render.ColorLightGray)
+	g.drawSimpleBar(cx, 5, "       ", r.Hull, r.MaxHull, render.ColorLightGray)
 
 	if damage == 0 {
 		buf.WriteString(cx, 7, "Hull integrity at 100%. No repairs needed.", render.ColorLightGreen, render.ColorBlack)
