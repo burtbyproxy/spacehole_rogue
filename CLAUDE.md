@@ -1,4 +1,4 @@
-# SpaceHole Camper
+# SpaceHole Rogue
 
 ASCII space survival roguelike in Go. You're a stranded redshirt with a busted shuttle, scrounging fuel one jump at a time.
 
@@ -10,19 +10,21 @@ Star Trek parody tone. The USS Monkey Lion is out there somewhere - you were cre
 
 | Document | Purpose |
 |----------|---------|
-| [planning/CAMPER_DESIGN.md](planning/CAMPER_DESIGN.md) | **Current direction** - space camper survival loop, goals, camping mechanics |
-| [planning/DESIGN.md](planning/DESIGN.md) | Original vision (ML lore, races, episodes) |
-| [planning/ARCHITECTURE.md](planning/ARCHITECTURE.md) | Tech stack, directory structure, ECS components |
-| [planning/SYSTEMS.md](planning/SYSTEMS.md) | Matter flow, skills, alerts, episodes, races |
-| [planning/PHASES.md](planning/PHASES.md) | Implementation roadmap |
+| **[planning/TODO.md](planning/TODO.md)** | **Current status and roadmap** |
+| [planning/DESIGN.md](planning/DESIGN.md) | Game vision, design pillars, story |
+| [planning/ARCHITECTURE.md](planning/ARCHITECTURE.md) | Tech stack, directory structure, ECS |
+| [planning/SYSTEMS.md](planning/SYSTEMS.md) | Matter flow, skills, alerts, episodes |
+| [planning/PHASES.md](planning/PHASES.md) | Implementation phases |
 
-### Implementation Specs
+---
 
-| Phase | Document |
-|-------|----------|
-| Sector Navigation | [planning/phase-07-sector-nav.md](planning/phase-07-sector-nav.md) |
-| System Map + Flight | [planning/phase-07b-system-map.md](planning/phase-07b-system-map.md) |
-| Matter Refactor | [planning/phase-matter-refactor.md](planning/phase-matter-refactor.md) |
+## Current Status
+
+**Working:** Prologue, shuttle systems, sector/system maps, planet exploration, stations, trading, discovery
+
+**Next up:** Jump drive fuel system, equipment repair, ship encounters, missions, danger!
+
+See [planning/TODO.md](planning/TODO.md) for full details.
 
 ---
 
@@ -32,12 +34,12 @@ Space van life roguelike. Each jump costs nearly all your fuel - you're stranded
 
 **Design Pillars:**
 1. Jump fuel is the critical gate - can't leave without it
-2. Where you camp matters - planet type, threat level, gear requirements
-3. "One more jump" is the addiction
-4. Sandbox goals - find the ML, find home, become a pirate, or just survive
-5. Meaningful scarcity
+2. Power management creates interesting choices
+3. "One more system" is the addiction
+4. Meaningful scarcity - closed-loop matter system
+5. Roguelike danger - death is real
 
-**Core Loop:** Jump → Stranded → Find Camp → Survive/Gather → Solve Episode → Upgrade → Jump
+**Core Loop:** Jump → Stranded → Explore → Gather Resources → Solve Problems → Upgrade → Jump
 
 ---
 
@@ -50,9 +52,14 @@ Space van life roguelike. Each jump costs nearly all your fuel - you're stranded
 
 ---
 
-## Current Phase
+## Equipment Power Model
 
-Check [planning/PHASES.md](planning/PHASES.md) for implementation status and next steps.
+Equipment has three power modes:
+- **PowerNone** - No power needed (beds, doors, tanks)
+- **PowerConstant** - Reserves power while ON (generator, recycler, consoles)
+- **PowerOnUse** - Draws power per interaction (replicators, shower)
+
+Constant-draw equipment must be turned ON (T key) to use. Reserved power shows as dark gold in the energy bar.
 
 ---
 
